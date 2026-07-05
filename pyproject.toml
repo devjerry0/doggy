@@ -17,6 +17,9 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
+[project.scripts]
+doggy = "doggy.main:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
