@@ -88,8 +88,10 @@ on a **4th thread** that only *reads* shared state, so it never blocks detection
 
 **Shared state between threads** (all thread-safe): a **latest-raw-frame** slot
 (capture → detect), a **latest-annotated-frame** slot (detect draws boxes → web
-MJPEG), a mutable **`RuntimeSettings`** object (env-seeded at boot; read every loop
-by detect/trigger/alerter, patched live by the web UI), and a **status/events**
+MJPEG), a thread-safe **`RuntimeSettings`** holder wrapping the current validated
+`TunableSettings` (seeded from `Settings` at boot; read every loop by
+detect/trigger/alerter; the web `PATCH` validates input into a new
+`TunableSettings` and swaps it in atomically), and a **status/events**
 snapshot (state, FPS, fires-this-hour, last-fire thumbnail) the web UI polls.
 
 ### Modules
@@ -101,9 +103,9 @@ snapshot (state, FPS, fires-this-hour, last-fire thumbnail) the web UI polls.
 | `trigger.py` | Decide when to fire | `TriggerLogic(clock, cfg).update(detections) -> bool` | Stateful class, **not** a pure function. Explicit state machine (below). Monotonic clock injected for deterministic tests. Time-based M-of-N confirmation. |
 | `safety.py` | Guardrails around firing | `SafetyGovernor.allow_fire() -> bool`, `record_fire(frame)` | Rate limit (max N fires/hour → auto-mute + log), master off switch, event log with saved thumbnail + timestamp + confidence, volume cap. |
 | `alerter.py` | Play a clip | `Alerter.alert()` | `SoundDeviceAlerter` (`sounddevice`+`soundfile`, CoreAudio on Mac / ALSA on Pi). Picks a **random** clip from a folder (anti-habituation). `CommandAlerter` fallback shells to `afplay`/`aplay`. `FakeAlerter` logs instead of playing. Async / non-blocking. |
-| `config.py` | Load + validate settings | frozen `Config` dataclass from env vars (+ `.env` for dev) | Reads `DOGGY_*` env vars (see §6). Validates on load: clip folder + model paths exist, thresholds in range, camera index/backend sane. Fails fast with a clear message. |
+| `config.py` | Load + validate settings | `Settings(BaseSettings)` from `pydantic-settings` | Reads `DOGGY_*` env vars + `.env` natively (env_prefix `DOGGY_`, case-insensitive). Pydantic validators enforce the §6 rules and fail fast at boot. A nested `TunableSettings` submodel is the live-tunable subset — reused directly as the FastAPI `PATCH /api/settings` body/response schema, so the same validation runs at boot and at runtime. |
 | `web.py` | Local dashboard server | FastAPI app (`GET /`, `GET /stream.mjpg`, `GET /api/status`, `PATCH /api/settings`, `POST /api/test-sound`, `POST /api/settings/save`) | Runs on its own thread (uvicorn). Reads shared state (latest annotated frame, `RuntimeSettings`, status/events); patches `RuntimeSettings` on knob changes. MJPEG-encodes only when a client is connected, throttled/downscaled so it never starves detection. Serves one static `index.html` (vanilla JS, polls `/api/status`). Optional (`DOGGY_WEB_ENABLED`). |
-| `main.py` | Orchestration | — | Loads model once at startup (fail fast), builds shared `RuntimeSettings` from env, starts the capture/detect/alert threads + (optional) web thread, installs SIGINT/SIGTERM handler for graceful shutdown (release camera, stop audio, stop server, join threads), owns top-level logging. |
+| `main.py` | Orchestration | — | Loads `Settings` + model once at startup (fail fast), builds the shared `RuntimeSettings` holder from the boot `Settings`, starts the capture/detect/alert threads + (optional) web thread, installs SIGINT/SIGTERM handler for graceful shutdown (release camera, stop audio, stop server, join threads), owns top-level logging. |
 
 ### Data type
 
@@ -157,12 +159,15 @@ Known v1 limitations to document in the README:
 ## 6. Configuration (environment variables)
 
 **All parameters are environment-variable configurable** — env vars are the single
-source of truth (12-factor style). `config.py` reads them into a validated,
-frozen `Config` dataclass at startup, applying the defaults below when a var is
-unset and failing fast on invalid values. For local dev convenience a `.env` file
-in the project root is auto-loaded (via `python-dotenv`); on the Pi the systemd
+source of truth (12-factor style). `config.py` uses **`pydantic-settings`
+(`BaseSettings`)** with `env_prefix="DOGGY_"` to read them into a validated
+`Settings` model at startup, applying the defaults below when a var is unset and
+failing fast (Pydantic `ValidationError`) on invalid values. `BaseSettings`
+auto-loads a `.env` file in the project root for local dev; on the Pi the systemd
 unit supplies them with `EnvironmentFile=`. No YAML/JSON config file — env only,
-so there is exactly one config mechanism.
+so there is exactly one config mechanism. The **live-tunable** subset is a nested
+`TunableSettings` model reused as the FastAPI knob schema (§7), so one definition
+drives boot defaults, boot validation, and runtime knob validation.
 
 All vars use the `DOGGY_` prefix. List-valued params are split into scalar vars
 (env values are strings).
@@ -264,8 +269,9 @@ The whole pipeline runs fine headless with `DOGGY_WEB_ENABLED=false`.
 ## 9. Tooling & dependencies
 
 - **`uv` + `pyproject.toml`** (no `requirements.txt`).
-- **`python-dotenv`** to auto-load a `.env` file in dev (env vars are the config
-  source of truth — see §6).
+- **`pydantic-settings`** for config: reads `DOGGY_*` env vars + `.env`, validates,
+  and the models double as the FastAPI knob schemas (env vars are the config source
+  of truth — see §6). No separate `python-dotenv`.
 - **`fastapi` + `uvicorn`** for the localhost dashboard (§7); the frontend is a
   single static `index.html` with vanilla JS (no Node/build step).
 - Torch/Ultralytics wheels differ between macOS-arm64 and Pi-aarch64-Linux, so
