@@ -18,6 +18,10 @@ The system runs **fully locally** — no cloud / OpenRouter inference.
 - **Trigger:** fire on **any confirmed dog in view**. v1 is honestly a
   *dog-presence detector*, not yet a counter-zone detector.
 - **Output:** play a pre-recorded sound clip (randomized from a folder).
+- **Local web UI:** a stupid-simple single-page dashboard on `localhost` showing
+  the live annotated video, current status/events, and **live-tunable knobs** for
+  the tunable params — so you can watch detections and tune thresholds without
+  restarting. Localhost-bound, no auth. See §7.
 - **Language:** Python first. Rust is deferred — only revisit if the Pi hot loop
   proves too slow, and only for the capture/inference loop.
 
@@ -78,7 +82,15 @@ OpenCV capture buffer fills during inference and hands back increasingly stale
 frames, so the dog is detected seconds after it left. The capture thread keeps
 only the newest frame (`queue.Queue(maxsize=1)`, drop-oldest). Sound playback must
 not block detection, so it runs on its own fire-and-forget worker. This is the
-right amount of concurrency — no multiprocessing / async framework.
+right amount of concurrency for the pipeline — no multiprocessing / async
+framework in the hot loop. The optional web dashboard (§7) runs a uvicorn server
+on a **4th thread** that only *reads* shared state, so it never blocks detection.
+
+**Shared state between threads** (all thread-safe): a **latest-raw-frame** slot
+(capture → detect), a **latest-annotated-frame** slot (detect draws boxes → web
+MJPEG), a mutable **`RuntimeSettings`** object (env-seeded at boot; read every loop
+by detect/trigger/alerter, patched live by the web UI), and a **status/events**
+snapshot (state, FPS, fires-this-hour, last-fire thumbnail) the web UI polls.
 
 ### Modules
 
@@ -90,7 +102,8 @@ right amount of concurrency — no multiprocessing / async framework.
 | `safety.py` | Guardrails around firing | `SafetyGovernor.allow_fire() -> bool`, `record_fire(frame)` | Rate limit (max N fires/hour → auto-mute + log), master off switch, event log with saved thumbnail + timestamp + confidence, volume cap. |
 | `alerter.py` | Play a clip | `Alerter.alert()` | `SoundDeviceAlerter` (`sounddevice`+`soundfile`, CoreAudio on Mac / ALSA on Pi). Picks a **random** clip from a folder (anti-habituation). `CommandAlerter` fallback shells to `afplay`/`aplay`. `FakeAlerter` logs instead of playing. Async / non-blocking. |
 | `config.py` | Load + validate settings | frozen `Config` dataclass from env vars (+ `.env` for dev) | Reads `DOGGY_*` env vars (see §6). Validates on load: clip folder + model paths exist, thresholds in range, camera index/backend sane. Fails fast with a clear message. |
-| `main.py` | Orchestration | — | Loads model once at startup (fail fast), starts the 3 threads, installs SIGINT/SIGTERM handler for graceful shutdown (release camera, stop audio, join threads), owns top-level logging. |
+| `web.py` | Local dashboard server | FastAPI app (`GET /`, `GET /stream.mjpg`, `GET /api/status`, `PATCH /api/settings`, `POST /api/test-sound`, `POST /api/settings/save`) | Runs on its own thread (uvicorn). Reads shared state (latest annotated frame, `RuntimeSettings`, status/events); patches `RuntimeSettings` on knob changes. MJPEG-encodes only when a client is connected, throttled/downscaled so it never starves detection. Serves one static `index.html` (vanilla JS, polls `/api/status`). Optional (`DOGGY_WEB_ENABLED`). |
+| `main.py` | Orchestration | — | Loads model once at startup (fail fast), builds shared `RuntimeSettings` from env, starts the capture/detect/alert threads + (optional) web thread, installs SIGINT/SIGTERM handler for graceful shutdown (release camera, stop audio, stop server, join threads), owns top-level logging. |
 
 ### Data type
 
@@ -174,13 +187,59 @@ All vars use the `DOGGY_` prefix. List-valued params are split into scalar vars
 | `DOGGY_MAX_FIRES_PER_HOUR` | `6` | Rate limit → auto-mute + log on exceed |
 | `DOGGY_EVENT_LOG_DIR` | `events/` | Thumbnails + jsonl event log |
 | `DOGGY_LOG_LEVEL` | `INFO` | Python logging level |
+| `DOGGY_WEB_ENABLED` | `true` | Run the local dashboard (§7) |
+| `DOGGY_WEB_HOST` | `127.0.0.1` | Bind address (set `0.0.0.0` to view from your phone on the LAN — no auth, so localhost by default) |
+| `DOGGY_WEB_PORT` | `8000` | Dashboard port |
+
+**Live-tunable vs restart-required.** Env vars set the *boot* values. The web UI
+can change the **live-tunable** subset at runtime (in-memory, via `RuntimeSettings`)
+— it takes effect on the next loop, no restart: `CONFIDENCE`, `CONFIRM_SECONDS`,
+`WINDOW_M/N`, `COOLDOWN_MIN/MAX_SECONDS`, `MAX_VOLUME`, `SAFETY_ENABLED`,
+`MAX_FIRES_PER_HOUR`, `CLIPS_DIR`, `LOG_LEVEL`. **Restart-required** (structural —
+shown read-only in the UI): camera backend/index/path, `MODEL_PATH`, alerter
+backend/audio device, web host/port. Live changes are session-only unless saved:
+`POST /api/settings/save` writes the current tunable values back to `.env`.
 
 Validation rules (fail fast at startup): `WINDOW_M <= WINDOW_N`;
 `COOLDOWN_MIN <= COOLDOWN_MAX`; `0 <= CONFIDENCE <= 1`; `0 <= MAX_VOLUME <= 1`;
 `CLIPS_DIR` non-empty and exists; `MODEL_PATH` exists; `CAMERA_PATH` set and exists
 when backend is `file`.
 
-## 7. Platform portability notes
+## 7. Local web UI
+
+A deliberately minimal localhost dashboard for watching detection and tuning knobs
+live. **One static `index.html`** (vanilla JS, no build step, no framework) served
+by a small **FastAPI + uvicorn** app running on its own thread. Interaction is
+plain REST + client polling — **no WebSocket** — to keep it simple.
+
+**Endpoints (`web.py`):**
+- `GET /` → the static dashboard page.
+- `GET /stream.mjpg` → MJPEG stream of the latest **annotated** frame (boxes +
+  labels drawn by the detect thread). Encoded only while a client is connected,
+  throttled (e.g. ≤10 FPS) and downscaled so it never starves detection.
+- `GET /api/status` → JSON snapshot the page polls (~2 Hz): trigger state
+  (IDLE/CONFIRMING/COOLDOWN), FPS, current dog confidence, fires-this-hour,
+  last-fire timestamp + thumbnail URL, current settings, muted?.
+- `PATCH /api/settings` → update live-tunable knobs (validated; applied on the next
+  loop via `RuntimeSettings`). Restart-required fields are rejected with a clear
+  message.
+- `POST /api/test-sound` → play a random clip now (verify audio without a dog).
+- `POST /api/settings/save` → persist current tunable values back to `.env`.
+
+**The page shows:**
+- The live annotated video (`<img src="/stream.mjpg">`).
+- A status strip: state, FPS, confidence, fires-this-hour, muted indicator.
+- **Knobs** for every live-tunable param (sliders/number inputs) that PATCH on
+  change; restart-required params shown read-only/greyed with a note.
+- A master **enable/off** toggle (`SAFETY_ENABLED`), a **Test sound** button, and a
+  **Save to .env** button.
+- A short recent-events list (from the safety event log) with thumbnails.
+
+**Scope guardrails:** localhost-bound by default (`DOGGY_WEB_HOST=127.0.0.1`), no
+auth, no accounts — it is a personal debug/tuning panel, not a product surface.
+The whole pipeline runs fine headless with `DOGGY_WEB_ENABLED=false`.
+
+## 8. Platform portability notes
 
 - **Camera:** `cv2.VideoCapture` works with USB webcams on both Mac and Pi, but
   **cannot see the Pi 5 CSI ribbon camera** (OpenCV has no libcamera backend).
@@ -202,11 +261,13 @@ when backend is `file`.
 - **Device selection:** auto-detect (MPS on Mac, CPU/NCNN on Pi); never hardcode
   `mps`.
 
-## 8. Tooling & dependencies
+## 9. Tooling & dependencies
 
 - **`uv` + `pyproject.toml`** (no `requirements.txt`).
 - **`python-dotenv`** to auto-load a `.env` file in dev (env vars are the config
   source of truth — see §6).
+- **`fastapi` + `uvicorn`** for the localhost dashboard (§7); the frontend is a
+  single static `index.html` with vanilla JS (no Node/build step).
 - Torch/Ultralytics wheels differ between macOS-arm64 and Pi-aarch64-Linux, so
   platform-specific handling is required (per-platform locks / install notes; use
   Ultralytics' documented Pi install path for a known-good torch/torchvision pair).
@@ -216,7 +277,7 @@ when backend is `file`.
   Ultralytics API. (A torch-free raw-NCNN path is a possible later optimization if
   install size/RAM becomes a problem.)
 
-## 9. Testing strategy
+## 10. Testing strategy
 
 - **Pure unit tests** (fast, no hardware, no model): `trigger.py` (feed synthetic
   detection sequences + a fake monotonic clock, assert fire/no-fire timing across
@@ -228,8 +289,12 @@ when backend is `file`.
   (`dog_walk.mp4`) + `FakeAlerter` logs → run `main.py` with a dev config and
   assert when it *would* fire. Record fixture clips: dog present, empty room, cat,
   low light — used as regression fixtures.
+- **Web API tests:** FastAPI `TestClient` — `PATCH /api/settings` updates
+  `RuntimeSettings` and is reflected in `GET /api/status`; restart-required fields
+  are rejected; invalid values are rejected by validation. No browser test needed
+  for v1 (the page is trivial static JS).
 
-## 10. Deployment
+## 11. Deployment
 
 - Dev on Mac (built-in/USB webcam + speakers).
 - Pi: `uv` install per platform notes, USB webcam + USB speaker, NCNN model export.
@@ -237,7 +302,7 @@ when backend is `file`.
   `Restart=on-failure`) — the natural counterpart to headless logging + graceful
   SIGTERM shutdown.
 
-## 11. Open follow-ups (post-v1, in rough priority order)
+## 12. Open follow-ups (post-v1, in rough priority order)
 
 1. Counter-zone ROI targeting (fire only when the dog overlaps a drawn region).
 2. Cat-vs-dog confidence margin + static-box suppression for false positives.
