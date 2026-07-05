@@ -89,7 +89,7 @@ right amount of concurrency — no multiprocessing / async framework.
 | `trigger.py` | Decide when to fire | `TriggerLogic(clock, cfg).update(detections) -> bool` | Stateful class, **not** a pure function. Explicit state machine (below). Monotonic clock injected for deterministic tests. Time-based M-of-N confirmation. |
 | `safety.py` | Guardrails around firing | `SafetyGovernor.allow_fire() -> bool`, `record_fire(frame)` | Rate limit (max N fires/hour → auto-mute + log), master off switch, event log with saved thumbnail + timestamp + confidence, volume cap. |
 | `alerter.py` | Play a clip | `Alerter.alert()` | `SoundDeviceAlerter` (`sounddevice`+`soundfile`, CoreAudio on Mac / ALSA on Pi). Picks a **random** clip from a folder (anti-habituation). `CommandAlerter` fallback shells to `afplay`/`aplay`. `FakeAlerter` logs instead of playing. Async / non-blocking. |
-| `config.py` | Load + validate settings | dataclass loaded from `config.yaml` | Validates on load: clip folder + model paths exist, thresholds in range, camera index/backend sane. Fails fast with a clear message. |
+| `config.py` | Load + validate settings | frozen `Config` dataclass from env vars (+ `.env` for dev) | Reads `DOGGY_*` env vars (see §6). Validates on load: clip folder + model paths exist, thresholds in range, camera index/backend sane. Fails fast with a clear message. |
 | `main.py` | Orchestration | — | Loads model once at startup (fail fast), starts the 3 threads, installs SIGINT/SIGTERM handler for graceful shutdown (release camera, stop audio, join threads), owns top-level logging. |
 
 ### Data type
@@ -141,40 +141,57 @@ Known v1 limitations to document in the README:
   suppression (a "dog" box unmoving for a long time → treat as furniture/picture)
   is a candidate follow-up.
 
-## 6. Configuration (`config.yaml`)
+## 6. Configuration (environment variables)
 
-```yaml
-camera:
-  backend: opencv         # opencv | file (FakeCamera for dev/CI)
-  index: 0                # webcam index (opencv)
-  path: null              # video/image path (file backend)
-detector:
-  model_path: models/yolo26n.pt        # .pt on Mac; NCNN export dir on Pi
-  confidence: 0.55                      # tune empirically; nano conf is noisy
-trigger:
-  confirm_seconds: 1.2                  # dog present this long before firing
-  window: [4, 6]                        # M-of-N sliding window
-  cooldown_seconds: [12, 20]            # jittered range
-alerter:
-  backend: sounddevice     # sounddevice | command | log(FakeAlerter)
-  clips_dir: sounds/       # random clip chosen per fire
-  device: null             # optional output device name (Pi: pick USB sink)
-  max_volume: 0.8
-safety:
-  enabled: true            # master off switch
-  max_fires_per_hour: 6
-  event_log_dir: events/   # thumbnails + jsonl
-logging:
-  level: INFO
-```
+**All parameters are environment-variable configurable** — env vars are the single
+source of truth (12-factor style). `config.py` reads them into a validated,
+frozen `Config` dataclass at startup, applying the defaults below when a var is
+unset and failing fast on invalid values. For local dev convenience a `.env` file
+in the project root is auto-loaded (via `python-dotenv`); on the Pi the systemd
+unit supplies them with `EnvironmentFile=`. No YAML/JSON config file — env only,
+so there is exactly one config mechanism.
+
+All vars use the `DOGGY_` prefix. List-valued params are split into scalar vars
+(env values are strings).
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `DOGGY_CAMERA_BACKEND` | `opencv` | `opencv` (USB webcam) or `file` (FakeCamera for dev/CI) |
+| `DOGGY_CAMERA_INDEX` | `0` | Webcam index (opencv backend) |
+| `DOGGY_CAMERA_PATH` | *(unset)* | Video/image path (file backend) |
+| `DOGGY_MODEL_PATH` | `models/yolo26n.pt` | `.pt` on Mac; NCNN export dir on Pi |
+| `DOGGY_CONFIDENCE` | `0.55` | Min `dog` confidence; tune empirically (nano conf is noisy) |
+| `DOGGY_CONFIRM_SECONDS` | `1.2` | Dog must be present this long before firing |
+| `DOGGY_WINDOW_M` | `4` | M of… |
+| `DOGGY_WINDOW_N` | `6` | …N recent evaluations must have a dog (flicker tolerance) |
+| `DOGGY_COOLDOWN_MIN_SECONDS` | `12` | Cooldown lower bound (jittered) |
+| `DOGGY_COOLDOWN_MAX_SECONDS` | `20` | Cooldown upper bound (jittered) |
+| `DOGGY_ALERTER_BACKEND` | `sounddevice` | `sounddevice` \| `command` \| `log` (FakeAlerter) |
+| `DOGGY_CLIPS_DIR` | `sounds/` | Folder of clips; one chosen at random per fire |
+| `DOGGY_AUDIO_DEVICE` | *(unset)* | Optional output device name (Pi: pick USB sink) |
+| `DOGGY_MAX_VOLUME` | `0.8` | Playback volume cap (0.0–1.0) |
+| `DOGGY_SAFETY_ENABLED` | `true` | Master off switch |
+| `DOGGY_MAX_FIRES_PER_HOUR` | `6` | Rate limit → auto-mute + log on exceed |
+| `DOGGY_EVENT_LOG_DIR` | `events/` | Thumbnails + jsonl event log |
+| `DOGGY_LOG_LEVEL` | `INFO` | Python logging level |
+
+Validation rules (fail fast at startup): `WINDOW_M <= WINDOW_N`;
+`COOLDOWN_MIN <= COOLDOWN_MAX`; `0 <= CONFIDENCE <= 1`; `0 <= MAX_VOLUME <= 1`;
+`CLIPS_DIR` non-empty and exists; `MODEL_PATH` exists; `CAMERA_PATH` set and exists
+when backend is `file`.
 
 ## 7. Platform portability notes
 
 - **Camera:** `cv2.VideoCapture` works with USB webcams on both Mac and Pi, but
   **cannot see the Pi 5 CSI ribbon camera** (OpenCV has no libcamera backend).
-  **v1 requires a USB webcam.** A `Picamera2Camera` backend can be added behind the
-  camera factory later (requires a `--system-site-packages` venv for the apt-only
-  `picamera2`, so it is deliberately out of v1).
+  **v1 requires a USB webcam.** The dev camera is a **Logitech C922 Pro Stream
+  Webcam** (UVC, VendorID `0x046d` / ProductID `0x085c`) confirmed connected to the
+  Mac — a standard UVC device that runs the identical code path on the Pi 5 (plug
+  it straight in). The Mac also exposes the built-in FaceTime camera, so the C922
+  is a non-default index: `DOGGY_CAMERA_INDEX` selects it (built-in is usually `0`,
+  the C922 typically `1` — verify on first run). A `Picamera2Camera` backend can be
+  added behind the camera factory later (requires a `--system-site-packages` venv
+  for the apt-only `picamera2`, so it is deliberately out of v1).
 - **Audio:** `sounddevice`+`soundfile` map to CoreAudio (Mac) and ALSA (Pi) with
   the same code. On a fresh Pi 5 (no 3.5mm jack) audio defaults to HDMI — the
   README will note selecting a USB speaker as the default sink and optionally
@@ -188,6 +205,8 @@ logging:
 ## 8. Tooling & dependencies
 
 - **`uv` + `pyproject.toml`** (no `requirements.txt`).
+- **`python-dotenv`** to auto-load a `.env` file in dev (env vars are the config
+  source of truth — see §6).
 - Torch/Ultralytics wheels differ between macOS-arm64 and Pi-aarch64-Linux, so
   platform-specific handling is required (per-platform locks / install notes; use
   Ultralytics' documented Pi install path for a known-good torch/torchvision pair).
