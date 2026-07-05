@@ -72,7 +72,10 @@ async function poll(){
   }
   document.getElementById("safety_enabled").checked = s.settings.safety_enabled;
   document.getElementById("events").innerHTML =
-    s.events.slice(-10).reverse().map(e => `${e.ts.toFixed(1)}s · conf ${e.confidence}`).join("<br>");
+    s.events.slice(-10).reverse().map(e =>
+      `<div style="margin:.2rem 0"><img src="/events/${e.thumb}" alt="" ` +
+      `style="height:38px;vertical-align:middle;border-radius:4px;margin-right:.4rem">` +
+      `${e.ts.toFixed(1)}s · conf ${e.confidence}</div>`).join("");
 }
 setInterval(poll, 500); poll();
 </script>

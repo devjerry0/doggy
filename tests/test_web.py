@@ -62,3 +62,27 @@ def test_write_env_preserves_structural_keys(tmp_path):
     assert "DOGGY_CAMERA_INDEX=1" in text
     assert "DOGGY_CONFIDENCE=0.7" in text
     assert "# comment" in text
+
+
+def _app_with_events(tmp_path):
+    from doggy.alerter import FakeAlerter
+    from doggy.config import Settings
+    from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
+
+    settings = Settings(event_log_dir=tmp_path)
+    runtime = RuntimeSettings(settings.tunable())
+    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter())
+    return TestClient(app)
+
+
+def test_events_route_serves_thumbnail(tmp_path):
+    (tmp_path / "fire_1.jpg").write_bytes(b"\xff\xd8\xff")
+    c = _app_with_events(tmp_path)
+    r = c.get("/events/fire_1.jpg")
+    assert r.status_code == 200
+    assert r.content == b"\xff\xd8\xff"
+
+
+def test_events_route_404_for_missing(tmp_path):
+    c = _app_with_events(tmp_path)
+    assert c.get("/events/nope.jpg").status_code == 404

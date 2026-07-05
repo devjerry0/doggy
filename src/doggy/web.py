@@ -74,6 +74,14 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
         save_env(runtime.get())
         return {"ok": True}
 
+    @app.get("/events/{name}")
+    def event_thumb(name: str) -> FileResponse:
+        # Path(name).name strips any directory components → no path traversal.
+        path = Path(settings.event_log_dir) / Path(name).name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(path)
+
     @app.get("/stream.mjpg")
     def stream() -> StreamingResponse:
         def gen():

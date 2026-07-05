@@ -54,7 +54,15 @@ class _ClipAlerter:
 
 
 class SoundDeviceAlerter(_ClipAlerter):
-    """Plays a random clip on a background thread (fire-and-forget)."""
+    """Plays a random clip on a background thread (fire-and-forget).
+
+    `device` selects the output (e.g. a USB speaker on the Pi); None = default.
+    """
+
+    def __init__(self, runtime: RuntimeSettings, rng: random.Random | None = None,
+                 device: str | None = None) -> None:
+        super().__init__(runtime, rng)
+        self._device = device
 
     def _emit(self, clip: Path, cfg: TunableSettings) -> None:
         threading.Thread(target=self._play, args=(clip, cfg.max_volume), daemon=True).start()
@@ -64,7 +72,7 @@ class SoundDeviceAlerter(_ClipAlerter):
         import sounddevice as sd
 
         data, samplerate = sf.read(str(clip), dtype="float32")
-        sd.play(data * max(0.0, min(1.0, volume)), samplerate)
+        sd.play(data * max(0.0, min(1.0, volume)), samplerate, device=self._device)
         sd.wait()
 
 
@@ -81,4 +89,4 @@ def build_alerter(settings: Settings, runtime: RuntimeSettings) -> Alerter:
         return FakeAlerter()
     if settings.alerter_backend == "command":
         return CommandAlerter(runtime)
-    return SoundDeviceAlerter(runtime)
+    return SoundDeviceAlerter(runtime, device=settings.audio_device)
