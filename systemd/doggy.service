@@ -1,0 +1,14 @@
+[Unit]
+Description=Doggy detector
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/doggy
+EnvironmentFile=/home/pi/doggy/.env
+ExecStart=/home/pi/.local/bin/uv run doggy
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
