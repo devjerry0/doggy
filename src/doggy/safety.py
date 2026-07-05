@@ -10,6 +10,7 @@ import numpy as np
 from doggy.state import RuntimeSettings
 
 _HOUR = 3600.0
+_CONFIDENCE_DECIMALS = 3
 
 
 class SafetyGovernor:
@@ -37,7 +38,11 @@ class SafetyGovernor:
         self._fires.append(now)
         thumb_name = f"fire_{now:.3f}.jpg"
         cv2.imwrite(str(self._dir / thumb_name), frame)
-        event = {"ts": now, "confidence": round(float(confidence), 3), "thumb": thumb_name}
+        event = {
+            "ts": now,
+            "confidence": round(float(confidence), _CONFIDENCE_DECIMALS),
+            "thumb": thumb_name,
+        }
         with (self._dir / "events.jsonl").open("a") as fh:
             fh.write(json.dumps(event) + "\n")
         return event

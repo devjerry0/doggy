@@ -7,6 +7,7 @@ from typing import Callable
 
 import cv2
 from fastapi import FastAPI, HTTPException
+from fastapi import status as http_status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
 
@@ -15,6 +16,9 @@ from doggy.config import Settings, TunableSettings
 from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
 
 _STATIC = Path(__file__).parent / "static"
+# Min interval between streamed JPEG frames (~10 FPS) so the MJPEG encode loop
+# never starves the detect loop.
+_MJPEG_FRAME_INTERVAL_SECONDS = 0.1
 
 
 def _write_env(tunable: TunableSettings, path: Path = Path(".env")) -> None:
@@ -60,7 +64,9 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
         try:
             updated = TunableSettings(**merged)
         except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
         runtime.update(updated)
         return updated.model_dump(mode="json")
 
@@ -79,7 +85,7 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
         # Path(name).name strips any directory components → no path traversal.
         path = Path(settings.event_log_dir) / Path(name).name
         if not path.is_file():
-            raise HTTPException(status_code=404, detail="not found")
+            raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="not found")
         return FileResponse(path)
 
     @app.get("/stream.mjpg")
@@ -92,7 +98,7 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
                     if ok:
                         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                                + buf.tobytes() + b"\r\n")
-                time.sleep(0.1)  # throttle to ~10 FPS so it never starves detection
+                time.sleep(_MJPEG_FRAME_INTERVAL_SECONDS)
 
         return StreamingResponse(gen(),
                                  media_type="multipart/x-mixed-replace; boundary=frame")

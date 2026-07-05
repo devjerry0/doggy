@@ -20,14 +20,27 @@ from doggy.trigger import TriggerLogic
 
 log = logging.getLogger("doggy")
 
+# Idle poll interval while the detect loop waits for the capture thread's
+# first frame.
+_IDLE_POLL_SECONDS = 0.01
+# Detection-overlay styling (OpenCV uses BGR).
+_BOX_COLOR = (0, 255, 0)
+_BOX_THICKNESS = 2
+_LABEL_FONT_SCALE = 0.5
+_LABEL_THICKNESS = 1
+_LABEL_Y_OFFSET = 6  # pixels above the box to place the label
+# Decimal places for the status readouts the dashboard polls.
+_CONFIDENCE_DECIMALS = 3
+_FPS_DECIMALS = 1
+
 
 def annotate(frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
     out = frame.copy()
     for d in detections:
         x1, y1, x2, y2 = d.box
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(out, f"{d.label} {d.confidence:.2f}", (x1, max(0, y1 - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.rectangle(out, (x1, y1), (x2, y2), _BOX_COLOR, _BOX_THICKNESS)
+        cv2.putText(out, f"{d.label} {d.confidence:.2f}", (x1, max(0, y1 - _LABEL_Y_OFFSET)),
+                    cv2.FONT_HERSHEY_SIMPLEX, _LABEL_FONT_SCALE, _BOX_COLOR, _LABEL_THICKNESS)
     return out
 
 
@@ -62,7 +75,7 @@ class Pipeline:
             event = self.safety.record_fire(frame, top, now)
             self.status.add_event(event)
             self.status.update(last_fire_ts=event["ts"], last_fire_thumb=event["thumb"])
-        self.status.update(state=self.trigger.state.value, confidence=round(top, 3),
+        self.status.update(state=self.trigger.state.value, confidence=round(top, _CONFIDENCE_DECIMALS),
                            fires_this_hour=self.safety.fires_last_hour(now), muted=muted)
         return fired and not muted
 
@@ -83,12 +96,12 @@ class Pipeline:
         while not stop.is_set():
             frame = self.raw_buffer.get()
             if frame is None:
-                time.sleep(0.01)
+                time.sleep(_IDLE_POLL_SECONDS)
                 continue
             self.run_once(frame)
             now = self.clock()
             dt = now - last
             if dt > 0:
-                self.status.update(fps=round(1.0 / dt, 1))
+                self.status.update(fps=round(1.0 / dt, _FPS_DECIMALS))
             last = now
         self.camera.close()

@@ -9,6 +9,11 @@ import numpy as np
 
 from doggy.config import Settings
 
+# Consecutive failed reads tolerated before OpenCVCamera gives up, and the
+# backoff between reconnect attempts.
+_DEFAULT_MAX_RECONNECTS = 5
+_RECONNECT_BACKOFF_SECONDS = 0.5
+
 
 class Camera(Protocol):
     def frames(self) -> Iterator[np.ndarray]: ...
@@ -48,7 +53,7 @@ class FakeCamera:
 class OpenCVCamera:
     """USB webcam via cv2.VideoCapture; reconnects on transient read failures."""
 
-    def __init__(self, index: int, max_reconnects: int = 5) -> None:
+    def __init__(self, index: int, max_reconnects: int = _DEFAULT_MAX_RECONNECTS) -> None:
         self._index = index
         self._max_reconnects = max_reconnects
         self._cap = cv2.VideoCapture(index)
@@ -62,7 +67,7 @@ class OpenCVCamera:
                 if failures > self._max_reconnects:
                     raise RuntimeError(f"camera {self._index} lost after {failures} failures")
                 self._cap.release()
-                time.sleep(0.5)
+                time.sleep(_RECONNECT_BACKOFF_SECONDS)
                 self._cap = cv2.VideoCapture(self._index)
                 continue
             failures = 0

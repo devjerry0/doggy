@@ -52,8 +52,11 @@ class Status:
     muted: bool = False
 
 
+_DEFAULT_MAX_EVENTS = 50  # recent fire events retained for the dashboard
+
+
 class StatusStore:
-    def __init__(self, max_events: int = 50) -> None:
+    def __init__(self, max_events: int = _DEFAULT_MAX_EVENTS) -> None:
         self._lock = threading.Lock()
         self._status = Status()
         self._events: deque[dict] = deque(maxlen=max_events)
