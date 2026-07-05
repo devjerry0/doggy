@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
@@ -47,11 +48,8 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
 
     @app.get("/api/status")
     def api_status() -> dict:
-        snap = status.snapshot()
         return {
-            "state": snap.state, "fps": snap.fps, "confidence": snap.confidence,
-            "fires_this_hour": snap.fires_this_hour, "muted": snap.muted,
-            "last_fire_ts": snap.last_fire_ts, "last_fire_thumb": snap.last_fire_thumb,
+            **asdict(status.snapshot()),
             "settings": runtime.get().model_dump(mode="json"),
             "events": status.events(),
         }

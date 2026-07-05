@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Protocol
 
-from doggy.config import Settings
+from doggy.config import Settings, TunableSettings
 from doggy.state import RuntimeSettings
 
 _CLIP_EXTS = {".wav", ".flac", ".ogg", ".mp3"}
@@ -32,8 +32,11 @@ class FakeAlerter:
         self.calls += 1
 
 
-class SoundDeviceAlerter:
-    """Plays a random clip on a background thread (fire-and-forget)."""
+class _ClipAlerter:
+    """Shared plumbing for clip-playing alerters: pick a random clip, then emit it.
+
+    Subclasses implement _emit() with their playback mechanism.
+    """
 
     def __init__(self, runtime: RuntimeSettings, rng: random.Random | None = None) -> None:
         self._runtime = runtime
@@ -44,6 +47,16 @@ class SoundDeviceAlerter:
         clip = pick_clip(cfg.clips_dir, self._rng)
         if clip is None:
             return
+        self._emit(clip, cfg)
+
+    def _emit(self, clip: Path, cfg: TunableSettings) -> None:
+        raise NotImplementedError
+
+
+class SoundDeviceAlerter(_ClipAlerter):
+    """Plays a random clip on a background thread (fire-and-forget)."""
+
+    def _emit(self, clip: Path, cfg: TunableSettings) -> None:
         threading.Thread(target=self._play, args=(clip, cfg.max_volume), daemon=True).start()
 
     def _play(self, clip: Path, volume: float) -> None:
@@ -55,16 +68,10 @@ class SoundDeviceAlerter:
         sd.wait()
 
 
-class CommandAlerter:
-    def __init__(self, runtime: RuntimeSettings, rng: random.Random | None = None) -> None:
-        self._runtime = runtime
-        self._rng = rng or random.Random()
+class CommandAlerter(_ClipAlerter):
+    """Plays a random clip by shelling out to afplay/aplay (non-blocking)."""
 
-    def alert(self) -> None:
-        cfg = self._runtime.get()
-        clip = pick_clip(cfg.clips_dir, self._rng)
-        if clip is None:
-            return
+    def _emit(self, clip: Path, cfg: TunableSettings) -> None:
         cmd = "afplay" if sys.platform == "darwin" else "aplay"
         subprocess.Popen([cmd, str(clip)])  # non-blocking
 

@@ -35,6 +35,7 @@ def test_pipeline_fires_after_confirmation(tmp_path):
         clock=lambda: next(clock),
         rng=random.Random(0),
     )
-    fired = [pipe.run_once() for _ in range(4)]
+    frame = np.zeros((16, 16, 3), np.uint8)
+    fired = [pipe.run_once(frame) for _ in range(4)]
     assert any(fired)
     assert alerter.calls == 1

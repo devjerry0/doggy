@@ -39,15 +39,13 @@ def main() -> None:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
-    web_thread = None
     if settings.web_enabled:
         from doggy.web import serve
-        web_thread = threading.Thread(
+        threading.Thread(
             target=serve,
             args=(settings, runtime, annotated_buffer, status, alerter),
             daemon=True,
-        )
-        web_thread.start()
+        ).start()
         log.info("dashboard at http://%s:%s", settings.web_host, settings.web_port)
 
     log.info("doggy starting")

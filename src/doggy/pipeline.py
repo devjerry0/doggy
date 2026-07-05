@@ -49,13 +49,8 @@ class Pipeline:
         self.clock = clock
         self.trigger = TriggerLogic(runtime, rng=rng or random.Random())
 
-    def run_once(self) -> bool:
-        frame = self.raw_buffer.get()
-        if frame is None:
-            # In tests the capture thread isn't running; pull one frame directly.
-            frame = next(self.camera.frames(), None)
-            if frame is None:
-                return False
+    def run_once(self, frame: np.ndarray) -> bool:
+        """Process a single frame: detect, annotate, trigger, maybe fire."""
         now = self.clock()
         detections = self.detector.detect(frame)
         self.annotated_buffer.set(annotate(frame, detections))
@@ -86,10 +81,11 @@ class Pipeline:
         cap.start()
         last = self.clock()
         while not stop.is_set():
-            if self.raw_buffer.get() is None:
+            frame = self.raw_buffer.get()
+            if frame is None:
                 time.sleep(0.01)
                 continue
-            self.run_once()
+            self.run_once(frame)
             now = self.clock()
             dt = now - last
             if dt > 0:
