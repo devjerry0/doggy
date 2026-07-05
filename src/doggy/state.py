@@ -57,7 +57,8 @@ class FrameBuffer:
 class Status:
     state: str = "IDLE"
     fps: float = 0.0
-    confidence: float = 0.0
+    confidence: float = 0.0  # highest-confidence dog in the frame
+    dogs: int = 0  # number of dogs detected in the frame
     fires_this_hour: int = 0
     last_fire_ts: float | None = None
     last_fire_thumb: str | None = None

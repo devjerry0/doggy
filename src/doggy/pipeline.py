@@ -75,6 +75,7 @@ class Pipeline:
             self.status.add_event(event)
             self.status.update(last_fire_ts=event["ts"], last_fire_thumb=event["thumb"])
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
+                           dogs=len(detections),
                            fires_this_hour=self.safety.fires_last_hour(now), muted=muted)
         return fired and not muted
 
