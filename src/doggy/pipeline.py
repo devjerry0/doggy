@@ -26,7 +26,6 @@ log = logging.getLogger("doggy")
 # first frame.
 _IDLE_POLL_SECONDS = 0.01
 # Detection-overlay styling (OpenCV uses BGR).
-_BOX_COLOR = (0, 255, 0)
 _BOX_THICKNESS = 2
 _LABEL_FONT_SCALE = 0.5
 _LABEL_THICKNESS = 1
