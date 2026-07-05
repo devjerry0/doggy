@@ -1,4 +1,7 @@
+import dataclasses
+
 import numpy as np
+import pytest
 
 from doggy.config import TunableSettings
 from doggy.detection import Detection
@@ -8,11 +11,8 @@ from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
 def test_detection_is_frozen():
     d = Detection(label="dog", confidence=0.9, box=(1, 2, 3, 4))
     assert d.box == (1, 2, 3, 4)
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         d.confidence = 0.1  # type: ignore[misc]
-        assert False, "should be frozen"
-    except Exception:
-        pass
 
 
 def test_runtime_settings_atomic_swap():

@@ -13,7 +13,7 @@ def test_stub_detector_scripts_returns():
 
 
 def test_select_device_returns_known_value():
-    assert select_device() in {"mps", "cpu", "cuda"}
+    assert select_device() in {"mps", "cpu"}
 
 
 @pytest.mark.slow

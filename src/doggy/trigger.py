@@ -4,7 +4,7 @@ import random
 from collections import deque
 from enum import Enum
 
-from doggy.detection import Detection
+from doggy.detection import Detection, TARGET_LABEL
 from doggy.state import RuntimeSettings
 
 
@@ -31,7 +31,7 @@ class TriggerLogic:
     def update(self, detections: list[Detection], now: float) -> bool:
         cfg = self._runtime.get()
         has_dog = any(
-            d.label == "dog" and d.confidence >= cfg.confidence for d in detections
+            d.label == TARGET_LABEL and d.confidence >= cfg.confidence for d in detections
         )
 
         self._window.append(has_dog)

@@ -81,7 +81,7 @@ class CommandAlerter(_ClipAlerter):
 
     def _emit(self, clip: Path, cfg: TunableSettings) -> None:
         cmd = "afplay" if sys.platform == "darwin" else "aplay"
-        subprocess.Popen([cmd, str(clip)])  # non-blocking
+        subprocess.Popen([cmd, str(clip)])
 
 
 def build_alerter(settings: Settings, runtime: RuntimeSettings) -> Alerter:

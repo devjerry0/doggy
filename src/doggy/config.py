@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TunableSettings(BaseModel):
     """The subset of config that can be changed live via the web UI."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     confidence: float = Field(0.55, ge=0.0, le=1.0)
     confirm_seconds: float = Field(1.2, ge=0.0)

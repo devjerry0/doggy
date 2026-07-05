@@ -7,13 +7,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from doggy.state import RuntimeSettings
+from doggy.state import CONFIDENCE_DECIMALS, FireEvent, RuntimeSettings
 
 _HOUR = 3600.0
-_CONFIDENCE_DECIMALS = 3
 
 
 class SafetyGovernor:
+    """Guards firing: master off switch, per-hour rate limit, and an event log."""
+
     def __init__(self, runtime: RuntimeSettings, event_log_dir: Path) -> None:
         self._runtime = runtime
         self._dir = Path(event_log_dir)
@@ -34,13 +35,13 @@ class SafetyGovernor:
             return False
         return self.fires_last_hour(now) < cfg.max_fires_per_hour
 
-    def record_fire(self, frame: np.ndarray, confidence: float, now: float) -> dict:
+    def record_fire(self, frame: np.ndarray, confidence: float, now: float) -> FireEvent:
         self._fires.append(now)
         thumb_name = f"fire_{now:.3f}.jpg"
         cv2.imwrite(str(self._dir / thumb_name), frame)
-        event = {
+        event: FireEvent = {
             "ts": now,
-            "confidence": round(float(confidence), _CONFIDENCE_DECIMALS),
+            "confidence": round(float(confidence), CONFIDENCE_DECIMALS),
             "thumb": thumb_name,
         }
         with (self._dir / "events.jsonl").open("a") as fh:

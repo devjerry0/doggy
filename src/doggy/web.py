@@ -19,9 +19,17 @@ _STATIC = Path(__file__).parent / "static"
 # Min interval between streamed JPEG frames (~10 FPS) so the MJPEG encode loop
 # never starves the detect loop.
 _MJPEG_FRAME_INTERVAL_SECONDS = 0.1
+# Starlette renamed HTTP_422_UNPROCESSABLE_ENTITY -> _CONTENT (0.47); accept either
+# (prefer the new name so current Starlette doesn't emit a deprecation warning).
+_HTTP_422 = getattr(http_status, "HTTP_422_UNPROCESSABLE_CONTENT", None) or getattr(
+    http_status, "HTTP_422_UNPROCESSABLE_ENTITY", 422
+)
 
 
 def _write_env(tunable: TunableSettings, path: Path = Path(".env")) -> None:
+    """Persist the tunable settings into .env in place: update existing keys,
+    append missing ones, and preserve comments and non-tunable (structural) keys.
+    """
     updates = {f"DOGGY_{k.upper()}": str(v) for k, v in tunable.model_dump().items()}
     lines: list[str] = []
     seen: set[str] = set()
@@ -64,9 +72,7 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
         try:
             updated = TunableSettings(**merged)
         except ValidationError as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-            ) from exc
+            raise HTTPException(status_code=_HTTP_422, detail=str(exc)) from exc
         runtime.update(updated)
         return updated.model_dump(mode="json")
 

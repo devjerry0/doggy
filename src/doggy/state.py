@@ -3,10 +3,22 @@ from __future__ import annotations
 import threading
 from collections import deque
 from dataclasses import dataclass, replace
+from typing import TypedDict
 
 import numpy as np
 
 from doggy.config import TunableSettings
+
+# Decimal places for the confidence value shown in the dashboard and event log.
+CONFIDENCE_DECIMALS = 3
+
+
+class FireEvent(TypedDict):
+    """A recorded deterrent firing, shown in the dashboard event list."""
+
+    ts: float
+    confidence: float
+    thumb: str
 
 
 class RuntimeSettings:
@@ -56,10 +68,12 @@ _DEFAULT_MAX_EVENTS = 50  # recent fire events retained for the dashboard
 
 
 class StatusStore:
+    """Thread-safe snapshot of live status plus a bounded log of recent fires."""
+
     def __init__(self, max_events: int = _DEFAULT_MAX_EVENTS) -> None:
         self._lock = threading.Lock()
         self._status = Status()
-        self._events: deque[dict] = deque(maxlen=max_events)
+        self._events: deque[FireEvent] = deque(maxlen=max_events)
 
     def update(self, **kwargs) -> None:
         with self._lock:
@@ -69,10 +83,10 @@ class StatusStore:
         with self._lock:
             return self._status
 
-    def add_event(self, event: dict) -> None:
+    def add_event(self, event: FireEvent) -> None:
         with self._lock:
             self._events.append(event)
 
-    def events(self) -> list[dict]:
+    def events(self) -> list[FireEvent]:
         with self._lock:
             return list(self._events)

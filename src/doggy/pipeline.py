@@ -15,7 +15,7 @@ from doggy.config import Settings
 from doggy.detection import Detection
 from doggy.detector import Detector
 from doggy.safety import SafetyGovernor
-from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
+from doggy.state import CONFIDENCE_DECIMALS, FrameBuffer, RuntimeSettings, StatusStore
 from doggy.trigger import TriggerLogic
 
 log = logging.getLogger("doggy")
@@ -29,8 +29,7 @@ _BOX_THICKNESS = 2
 _LABEL_FONT_SCALE = 0.5
 _LABEL_THICKNESS = 1
 _LABEL_Y_OFFSET = 6  # pixels above the box to place the label
-# Decimal places for the status readouts the dashboard polls.
-_CONFIDENCE_DECIMALS = 3
+# Decimal places for the FPS readout (confidence precision is shared: CONFIDENCE_DECIMALS).
 _FPS_DECIMALS = 1
 
 
@@ -75,7 +74,7 @@ class Pipeline:
             event = self.safety.record_fire(frame, top, now)
             self.status.add_event(event)
             self.status.update(last_fire_ts=event["ts"], last_fire_thumb=event["thumb"])
-        self.status.update(state=self.trigger.state.value, confidence=round(top, _CONFIDENCE_DECIMALS),
+        self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
                            fires_this_hour=self.safety.fires_last_hour(now), muted=muted)
         return fired and not muted
 

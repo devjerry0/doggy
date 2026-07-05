@@ -44,7 +44,7 @@ def test_test_sound_triggers_alerter():
     assert alerter.calls == 1
 
 
-def test_save_persists(tmp_path):
+def test_save_persists():
     saved = {}
     c, _, _ = client(saved=saved)
     c.patch("/api/settings", json={"confidence": 0.65})

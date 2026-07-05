@@ -7,7 +7,7 @@ from typing import Protocol
 import numpy as np
 
 from doggy.config import Settings
-from doggy.detection import Detection
+from doggy.detection import Detection, TARGET_LABEL
 from doggy.state import RuntimeSettings
 
 
@@ -39,6 +39,8 @@ def select_device() -> str:
 
 
 class YoloDetector:
+    """Ultralytics YOLO wrapper: runs the model and returns only dog detections."""
+
     def __init__(self, model_path: Path, runtime: RuntimeSettings, device: str | None = None) -> None:
         from ultralytics import YOLO
 
@@ -55,7 +57,7 @@ class YoloDetector:
             names = r.names
             for box in r.boxes:
                 label = names[int(box.cls[0])]
-                if label != "dog":
+                if label != TARGET_LABEL:
                     continue
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
                 out.append(Detection(label, float(box.conf[0]), (x1, y1, x2, y2)))
