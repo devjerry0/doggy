@@ -4,14 +4,19 @@
 # scripts/bt-agent-daemon.py for the store_hint=0 explanation).
 #
 # What it does (all idempotent):
-#   - installs pi-bluetooth (Pi 4 onboard BT firmware) + adds the user to the
-#     `bluetooth` group
+#   - installs pi-bluetooth + the PipeWire A2DP audio stack (Pi OS Lite has none
+#     of it) and adds the user to the `bluetooth` group + enables linger
 #   - BlueZ: JustWorksRepairing=always + reconnect policy (/etc/bluetooth/main.conf)
 #   - WirePlumber: disable bluez seat-monitoring so A2DP endpoints load headless
+#   - restarts the user session so WirePlumber inherits the bluetooth group
+#     (else D-Bus rejects its A2DP-endpoint registration -> no sink / no audio)
 #   - deploys bt-agent-daemon.py + installs the doggy-bt.service (persistent agent
 #     + reconnect loop, runs as the app user so it can reach that user's PipeWire
 #     A2DP endpoint — running it as root gives avdtp "Permission denied")
 #   - runs the one-time interactive pair (you must put the speaker in pairing mode)
+#
+# Note: BT speakers idle-sleep, so alert clips need ~0.9s of LEADING SILENCE or the
+# first ~1s is lost while the speaker wakes (see scripts/gen-beeps.py LEAD_SILENCE).
 #
 # IMPORTANT: run this BEFORE harden-pi.sh — installing pi-bluetooth needs apt
 # (internet), which the egress firewall later blocks.
@@ -33,11 +38,16 @@ scp -q "$HERE/bt-agent-daemon.py" "$HERE/bt-pair.py" "$TARGET:~/"
 ssh "$TARGET" "MAC='$MAC' USER_NAME='$USER_NAME' bash -s" <<'REMOTE'
 set -euo pipefail
 
-echo "==> pi-bluetooth + bluetooth group"
+echo "==> BT + audio packages (Pi OS Lite ships none of these)"
 if command -v apt-get >/dev/null 2>&1; then
-  sudo apt-get update -qq && sudo apt-get install -y -qq pi-bluetooth || true
+  # pi-bluetooth = Pi 4 onboard BT firmware/hciuart; pipewire+wireplumber+
+  # libspa-0.2-bluetooth = the A2DP audio stack (without libspa bluez you get
+  # br-connection-profile-unavailable on connect).
+  sudo apt-get update -qq && sudo apt-get install -y -qq \
+    pi-bluetooth pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth || true
 fi
 sudo usermod -aG bluetooth "$USER_NAME"
+sudo loginctl enable-linger "$USER_NAME"   # run the user PipeWire session headless at boot
 
 echo "==> BlueZ: JustWorksRepairing + reconnect policy (edit main.conf in place)"
 # Stock main.conf ships these keys commented; uncomment+set them by key name.
@@ -60,6 +70,16 @@ wireplumber.profiles = {
   }
 }
 WP
+
+echo "==> (re)start the user's PipeWire session WITH the bluetooth group"
+# A FRESH user session is required so WirePlumber inherits the just-added
+# bluetooth group; otherwise D-Bus rejects its A2DP-endpoint registration with
+# bluetoothd (symptom: connect works at BlueZ level but no sink / no audio).
+UID_N="$(id -u "$USER_NAME")"
+export XDG_RUNTIME_DIR="/run/user/$UID_N"
+sudo systemctl restart "user@${UID_N}.service"
+sleep 5
+systemctl --user enable --now pipewire pipewire-pulse wireplumber 2>/dev/null || true
 
 echo "==> persistent-agent reconnect service (runs as $USER_NAME, not root)"
 sudo tee /etc/systemd/system/doggy-bt.service >/dev/null <<UNIT

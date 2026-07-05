@@ -68,8 +68,17 @@ def triple_square(amp=0.9, f=3000.0, beep=0.16, gap=0.11, n=3):
     return out
 
 
-# The shipped default: "medium" rising sine chirp.
-DEFAULT = lambda: chirp(sweeps=2, amp=0.72, f0=1400, f1=3700, dur=0.32, gap=0.08, harmonic=0.18)
+# Leading silence so a Bluetooth speaker that idle-slept wakes BEFORE the sound
+# starts (otherwise the first ~1s plays into a still-waking link and is lost).
+LEAD_SILENCE = 0.9
+
+
+def _lead():
+    return [0.0] * int(LEAD_SILENCE * SR)
+
+
+# The shipped default: 0.3s wake-silence + a "medium" rising sine chirp.
+DEFAULT = lambda: _lead() + chirp(sweeps=2, amp=0.72, f0=1400, f1=3700, dur=0.32, gap=0.08, harmonic=0.18)
 
 
 def main() -> None:
