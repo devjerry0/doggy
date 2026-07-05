@@ -14,9 +14,11 @@ from doggy.camera import Camera
 from doggy.config import Settings
 from doggy.detection import Detection
 from doggy.detector import Detector
+from doggy.pacer import Pacer
 from doggy.safety import SafetyGovernor
 from doggy.state import CONFIDENCE_DECIMALS, FrameBuffer, RuntimeSettings, StatusStore
 from doggy.trigger import TriggerLogic
+from doggy.zone import ZoneFilter
 
 log = logging.getLogger("doggy")
 
@@ -31,15 +33,28 @@ _LABEL_THICKNESS = 1
 _LABEL_Y_OFFSET = 6  # pixels above the box to place the label
 # Decimal places for the FPS readout (confidence precision is shared: CONFIDENCE_DECIMALS).
 _FPS_DECIMALS = 1
+_DOG_ACTIVE_COLOR = (0, 0, 255)     # red BGR — in-zone / will trigger
+_DOG_IGNORED_COLOR = (150, 150, 150)  # grey — outside zone, ignored
+_ZONE_COLOR = (0, 165, 255)         # orange BGR
+_ZONE_ALPHA = 0.25
 
 
-def annotate(frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
+def annotate(frame, detections, in_zone=None, zone_points=None):
     out = frame.copy()
+    h, w = frame.shape[0], frame.shape[1]
+    if zone_points and len(zone_points) >= 3:
+        pts = np.array([[int(x * w), int(y * h)] for x, y in zone_points], np.int32)
+        overlay = out.copy()
+        cv2.fillPoly(overlay, [pts], _ZONE_COLOR)
+        cv2.addWeighted(overlay, _ZONE_ALPHA, out, 1 - _ZONE_ALPHA, 0, out)
+        cv2.polylines(out, [pts], True, _ZONE_COLOR, _BOX_THICKNESS)
+    active = detections if in_zone is None else in_zone
     for d in detections:
+        color = _DOG_ACTIVE_COLOR if d in active else _DOG_IGNORED_COLOR
         x1, y1, x2, y2 = d.box
-        cv2.rectangle(out, (x1, y1), (x2, y2), _BOX_COLOR, _BOX_THICKNESS)
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, _BOX_THICKNESS)
         cv2.putText(out, f"{d.label} {d.confidence:.2f}", (x1, max(0, y1 - _LABEL_Y_OFFSET)),
-                    cv2.FONT_HERSHEY_SIMPLEX, _LABEL_FONT_SCALE, _BOX_COLOR, _LABEL_THICKNESS)
+                    cv2.FONT_HERSHEY_SIMPLEX, _LABEL_FONT_SCALE, color, _LABEL_THICKNESS)
     return out
 
 
@@ -60,14 +75,19 @@ class Pipeline:
         self.safety = safety
         self.clock = clock
         self.trigger = TriggerLogic(runtime, rng=rng or random.Random())
+        self.zone = ZoneFilter()
+        self.pacer = Pacer(clock=clock)
 
     def run_once(self, frame: np.ndarray) -> bool:
         """Process a single frame: detect, annotate, trigger, maybe fire."""
         now = self.clock()
+        cfg = self.runtime.get()
         detections = self.detector.detect(frame)
-        self.annotated_buffer.set(annotate(frame, detections))
-        top = max((d.confidence for d in detections), default=0.0)
-        fired = self.trigger.update(detections, now)
+        points = cfg.zone_points if cfg.zone_enabled else []
+        in_zone = self.zone.filter(detections, points, frame.shape)
+        self.annotated_buffer.set(annotate(frame, detections, in_zone, points))
+        top = max((d.confidence for d in in_zone), default=0.0)
+        fired = self.trigger.update(in_zone, now)
         muted = not self.safety.allow_fire(now)
         if fired and not muted:
             self.alerter.alert()
@@ -75,7 +95,7 @@ class Pipeline:
             self.status.add_event(event)
             self.status.update(last_fire_ts=event["ts"], last_fire_thumb=event["thumb"])
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
-                           dogs=len(detections),
+                           dogs=len(in_zone),
                            fires_this_hour=self.safety.fires_last_hour(now), muted=muted)
         return fired and not muted
 
@@ -98,6 +118,7 @@ class Pipeline:
             if frame is None:
                 time.sleep(_IDLE_POLL_SECONDS)
                 continue
+            self.pacer.wait(self.runtime.get().detect_interval_seconds)
             self.run_once(frame)
             now = self.clock()
             dt = now - last

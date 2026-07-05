@@ -70,3 +70,54 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
     frame = np.zeros((40, 40, 3), np.uint8)
     out = annotate(frame, two_dogs)
     assert (out != 0).any()  # boxes were drawn onto the blank frame
+
+
+def test_pipeline_ignores_dogs_outside_zone(tmp_path):
+    # zone = top-left triangle; a dog only in the bottom-right must NOT count/fire
+    settings = Settings(zone_enabled=True,
+                        zone_points=[(0.0, 0.0), (0.5, 0.0), (0.0, 0.5)],
+                        confirm_seconds=0.0, window_m=1, window_n=1)
+    runtime = RuntimeSettings(settings.tunable())
+    outside = [Detection("dog", 0.9, (80, 80, 95, 95))]
+    status = StatusStore()
+    pipe = Pipeline(
+        settings=settings, detector=StubDetector([outside]),
+        camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
+        alerter=FakeAlerter(), runtime=runtime, status=status,
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        safety=SafetyGovernor(runtime, tmp_path), clock=lambda: 0.0,
+        rng=random.Random(0),
+    )
+    fired = pipe.run_once(np.zeros((100, 100, 3), np.uint8))
+    assert fired is False
+    assert status.snapshot().dogs == 0
+
+def test_pipeline_fires_for_dog_inside_zone(tmp_path):
+    settings = Settings(zone_enabled=True,
+                        zone_points=[(0.0, 0.0), (0.6, 0.0), (0.0, 0.6)],
+                        confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5)
+    runtime = RuntimeSettings(settings.tunable())
+    inside = [Detection("dog", 0.9, (5, 5, 20, 20))]
+    alerter = FakeAlerter()
+    pipe = Pipeline(
+        # TriggerLogic (pre-existing, out of scope here) never fires on the very
+        # first sighting -- the IDLE->CONFIRMING transition always returns False
+        # regardless of confirm_seconds (see test_trigger.py::test_single_frame_does_not_fire).
+        # Two identical in-zone frames are scripted so the second call can fire.
+        settings=settings, detector=StubDetector([inside, inside]),
+        camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
+        alerter=alerter, runtime=runtime, status=StatusStore(),
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        safety=SafetyGovernor(runtime, tmp_path), clock=lambda: 0.0,
+        rng=random.Random(0),
+    )
+    assert pipe.run_once(np.zeros((100, 100, 3), np.uint8)) is False
+    assert pipe.run_once(np.zeros((100, 100, 3), np.uint8)) is True
+    assert alerter.calls == 1
+
+def test_annotate_draws_zone_polygon():
+    from doggy.pipeline import annotate
+    frame = np.zeros((100, 100, 3), np.uint8)
+    out = annotate(frame, [], in_zone=[], zone_points=[(0.0, 0.0), (0.6, 0.0), (0.0, 0.6)])
+    assert (out != 0).any()   # the polygon outline/fill was drawn
