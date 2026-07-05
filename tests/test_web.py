@@ -102,3 +102,16 @@ def test_write_env_roundtrips_zone_points(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     s = Settings(_env_file=str(env))
     assert s.zone_points == [(0.1, 0.2), (0.3, 0.4), (0.5, 0.1)]
+
+
+def test_index_has_zone_controls():
+    from fastapi.testclient import TestClient
+    from doggy.web import create_app
+    from doggy.config import Settings
+    from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
+    from doggy.alerter import FakeAlerter
+    s = Settings()
+    app = create_app(s, RuntimeSettings(s.tunable()), FrameBuffer(), StatusStore(), FakeAlerter())
+    html = TestClient(app).get("/").text
+    assert "Finish zone" in html and "Clear zone" in html
+    assert "detect_interval_seconds" in html

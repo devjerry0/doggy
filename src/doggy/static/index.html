@@ -19,7 +19,17 @@
 <body>
 <h1>🐕 doggy dashboard</h1>
 <div class="row">
-  <div class="panel"><img src="/stream.mjpg" alt="live" /></div>
+  <div class="panel">
+    <div id="vidwrap" style="position:relative; display:inline-block;">
+      <img id="live" src="/stream.mjpg" alt="live" />
+      <canvas id="zonecanvas" style="position:absolute; left:0; top:0; cursor:crosshair;"></canvas>
+    </div>
+    <div>
+      <button onclick="finishZone()">Finish zone</button>
+      <button onclick="clearZone()">Clear zone</button>
+      <span id="zonehint" style="font-size:.8rem;color:#aaa;">click to place zone points</span>
+    </div>
+  </div>
   <div class="panel">
     <div class="stat">State: <span id="state">–</span></div>
     <div>FPS: <span id="fps">–</span> · dogs: <span id="dogs">–</span>
@@ -35,6 +45,8 @@
     <input id="cooldown_max_seconds" type="range" min="0" max="120" step="1" />
     <label>max_fires_per_hour <span id="max_fires_per_hour_v"></span></label>
     <input id="max_fires_per_hour" type="range" min="0" max="60" step="1" />
+    <label>detect_interval_seconds <span id="detect_interval_seconds_v"></span></label>
+    <input id="detect_interval_seconds" type="range" min="0" max="3" step="0.1" />
     <label><input id="safety_enabled" type="checkbox" /> safety enabled</label>
     <div>
       <button onclick="testSound()">Test sound</button>
@@ -46,7 +58,7 @@
 </div>
 <script>
 const KNOBS = ["confidence","confirm_seconds","cooldown_min_seconds",
-               "cooldown_max_seconds","max_fires_per_hour"];
+               "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds"];
 async function patch(body){
   await fetch("/api/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
@@ -78,6 +90,43 @@ async function poll(){
       `<div style="margin:.2rem 0"><img src="/events/${e.thumb}" alt="" ` +
       `style="height:38px;vertical-align:middle;border-radius:4px;margin-right:.4rem">` +
       `${e.ts.toFixed(1)}s · conf ${e.confidence}</div>`).join("");
+  if (drawing.length === 0 && s.settings.zone_enabled){ drawZone(s.settings.zone_points, false); }
+}
+const img = document.getElementById("live");
+const canvas = document.getElementById("zonecanvas");
+const ctx = canvas.getContext("2d");
+let drawing = [];         // in-progress points, normalized [0,1]
+function sizeCanvas(){ canvas.width = img.clientWidth; canvas.height = img.clientHeight; }
+img.addEventListener("load", sizeCanvas);
+window.addEventListener("resize", () => { sizeCanvas(); });
+canvas.addEventListener("click", e => {
+  const r = img.getBoundingClientRect();
+  drawing.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
+  drawZone(drawing, true);
+});
+function drawZone(points, inProgress){
+  sizeCanvas();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!points.length) return;
+  ctx.strokeStyle = inProgress ? "#0af" : "#fa0";
+  ctx.lineWidth = 2; ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = p[0] * canvas.width, y = p[1] * canvas.height;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    ctx.fillStyle = "#0af"; ctx.fillRect(x - 3, y - 3, 6, 6);
+  });
+  if (!inProgress) ctx.closePath();
+  ctx.stroke();
+}
+async function finishZone(){
+  if (drawing.length < 3){ alert("place at least 3 points"); return; }
+  await patch({zone_enabled: true, zone_points: drawing});
+  drawing = [];
+}
+async function clearZone(){
+  drawing = [];
+  await patch({zone_enabled: false, zone_points: []});
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 setInterval(poll, 500); poll();
 </script>
