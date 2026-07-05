@@ -47,9 +47,45 @@ This rsyncs the code, `uv sync`s (CPU-only Torch), installs the **NCNN** toolcha
 (`Restart=always` — the app exits 0 when no camera is attached, so it must relaunch
 until the webcam is present).
 
-## 4. Harden (LAN-only appliance)
+## 4. Bluetooth speaker — auto-reconnect across power loss
 
-After the model + deps are downloaded:
+If you want alert audio on a Bluetooth speaker (e.g. a JBL Go 5 with no aux in),
+run this **before hardening** (it needs apt/internet, which the firewall later
+blocks):
+
+```sh
+./scripts/setup-bt-speaker.sh doggy@doggypi.local AA:BB:CC:DD:EE:FF   # <speaker MAC>
+```
+
+It installs `pi-bluetooth`, adds the user to the `bluetooth` group, sets BlueZ
+`JustWorksRepairing=always` + a reconnect policy, tells WirePlumber to load the
+bluez A2DP endpoints headlessly (`monitor.bluez.seat-monitoring = disabled` —
+without this the sink never appears on a headless box), installs a **persistent
+pairing-agent + reconnect service** (`doggy-bt.service`), then walks you through
+a one-time pairing (put the speaker in pairing mode when prompted). Set
+`DOGGY_ALERTER_BACKEND=command` in `.env` so playback routes through PipeWire →
+Bluetooth (`pw-play`; PortAudio/`sounddevice` will NOT hit a BT sink).
+
+**The gotcha that cost us hours — cheap speakers store no bond.** The Go 5 pairs
+as *No Bonding*, so the kernel sets `store_hint=0` and BlueZ never writes a
+`[LinkKey]` to `/var/lib/bluetooth`. After a reboot it's `Paired: no` and
+`connect` fails with `br-connection-unknown`. This is the *speaker's* firmware,
+not fixable by how you pair (one-shot, kept-alive pipe, and a real PTY all give
+store_hint=0). What makes hands-off reconnect work anyway: a `NoInputNoOutput`
+pairing **agent kept registered at all times** (the `doggy-bt` daemon, in a
+long-lived `bluetoothctl` PTY) so the fresh Just-Works re-pair is auto-accepted
+on every boot. The service must run **as the app user, not root** — as root the
+A2DP connect fails with `avdtp Permission denied` because the media endpoint
+belongs to the user's PipeWire. After setup, a power cycle reconnects the
+speaker ~10–15 s after boot with zero touches.
+
+Note: the Pi 4's onboard radio shares one antenna for WiFi + BT, which can cause
+occasional `br-connection-unknown` drops under load; a ~$9 USB BT dongle (e.g.
+TP-Link UB400, CSR8510 — truly plug-and-play on Linux) sidesteps that entirely.
+
+## 5. Harden (LAN-only appliance)
+
+After the model + deps are downloaded (and BT, if any, is set up):
 
 ```sh
 ./scripts/harden-pi.sh doggy@doggypi.local 192.168.50.0/24
