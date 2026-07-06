@@ -65,6 +65,7 @@
     <div class="statline">
       <span>FPS: <span id="fps">–</span></span>
       <span>dogs: <span id="dogs">–</span></span>
+      <span>people: <span id="people">–</span></span>
       <span>conf: <span id="conf">–</span></span>
       <span>fires/hr: <span id="fires">–</span></span>
       <span>🌡️ <span id="temp">–</span>°C <span id="cooling"></span> <span id="muted"></span></span>
@@ -87,6 +88,9 @@
     <label>detect_interval_seconds <span id="detect_interval_seconds_v"></span></label>
     <input id="detect_interval_seconds" type="range" min="0" max="3" step="0.1" />
     <label class="checkrow"><input id="safety_enabled" type="checkbox" /> safety enabled</label>
+    <label class="checkrow"><input id="person_suppression_enabled" type="checkbox" /> suppress people mistaken for dogs</label>
+    <label>person_iou_threshold <span id="person_iou_threshold_v"></span></label>
+    <input id="person_iou_threshold" type="range" min="0" max="1" step="0.01" />
     <div class="btnrow">
       <button onclick="testSound()">Test sound</button>
       <button onclick="save()">Save to .env</button>
@@ -97,7 +101,8 @@
 </div>
 <script>
 const KNOBS = ["confidence","confirm_seconds","window_m","window_n","cooldown_min_seconds",
-               "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds"];
+               "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds",
+               "person_iou_threshold"];
 async function patch(body){
   await fetch("/api/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
@@ -108,6 +113,8 @@ KNOBS.forEach(k => {
 });
 document.getElementById("safety_enabled").addEventListener("change", e =>
   patch({safety_enabled: e.target.checked}));
+document.getElementById("person_suppression_enabled").addEventListener("change", e =>
+  patch({person_suppression_enabled: e.target.checked}));
 async function testSound(){ await fetch("/api/test-sound",{method:"POST"}); }
 async function save(){ await fetch("/api/settings/save",{method:"POST"}); }
 async function poll(){
@@ -116,6 +123,7 @@ async function poll(){
   document.getElementById("fps").textContent = s.fps;
   document.getElementById("conf").textContent = s.confidence;
   document.getElementById("dogs").textContent = s.dogs;
+  document.getElementById("people").textContent = s.people;
   document.getElementById("fires").textContent = s.fires_this_hour;
   document.getElementById("muted").innerHTML = s.muted ? '<span class="muted">MUTED</span>' : '';
   document.getElementById("temp").textContent = s.temp_c == null ? "–" : s.temp_c.toFixed(1);
@@ -134,6 +142,7 @@ async function poll(){
     document.getElementById(k+"_v").textContent = s.settings[k];
   }
   document.getElementById("safety_enabled").checked = s.settings.safety_enabled;
+  document.getElementById("person_suppression_enabled").checked = s.settings.person_suppression_enabled;
   document.getElementById("events").innerHTML =
     s.events.slice(-10).reverse().map(e =>
       `<div style="margin:.2rem 0"><img src="/events/${e.thumb}" alt="" ` +

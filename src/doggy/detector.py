@@ -7,8 +7,12 @@ from typing import Protocol
 import numpy as np
 
 from doggy.config import Settings
-from doggy.detection import Detection, TARGET_LABEL
+from doggy.detection import Detection, PERSON_LABEL, TARGET_LABEL
 from doggy.state import RuntimeSettings
+
+# Classes the detector surfaces: the target (dog) plus people, which the pipeline
+# uses to suppress people misclassified as dogs. Both come free from one inference.
+_RETURNED_LABELS = frozenset({TARGET_LABEL, PERSON_LABEL})
 
 
 class Detector(Protocol):
@@ -39,7 +43,7 @@ def select_device() -> str:
 
 
 class YoloDetector:
-    """Ultralytics YOLO wrapper: runs the model and returns only dog detections."""
+    """Ultralytics YOLO wrapper: runs the model and returns dog + person detections."""
 
     def __init__(self, model_path: Path, runtime: RuntimeSettings, device: str | None = None) -> None:
         from ultralytics import YOLO
@@ -57,7 +61,7 @@ class YoloDetector:
             names = r.names
             for box in r.boxes:
                 label = names[int(box.cls[0])]
-                if label != TARGET_LABEL:
+                if label not in _RETURNED_LABELS:
                     continue
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
                 out.append(Detection(label, float(box.conf[0]), (x1, y1, x2, y2)))

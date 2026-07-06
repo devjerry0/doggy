@@ -29,6 +29,10 @@ class TunableSettings(BaseModel):
     thermal_target_c: float = Field(74.0, ge=0.0)
     thermal_max_c: float = Field(82.0, ge=0.0)
     thermal_cooldown_interval_seconds: float = Field(1.5, ge=0.0)
+    person_suppression_enabled: bool = True
+    # A "dog" whose box overlaps a person's by at least this IoU is treated as a
+    # misclassified person and suppressed (not fired on). High by design.
+    person_iou_threshold: float = Field(0.85, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "TunableSettings":

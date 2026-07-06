@@ -141,6 +141,57 @@ def test_pipeline_records_trigger_confidence_not_empty_fire_frame(tmp_path):
     assert status.events()[-1]["confidence"] == 0.9   # not 0.0
 
 
+def test_pipeline_suppresses_person_misclassified_as_dog(tmp_path):
+    # a "dog" box coincident with a person box is a misclassified human -> no fire
+    settings = Settings(confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5,
+                        person_suppression_enabled=True, person_iou_threshold=0.85,
+                        confidence=0.5)
+    runtime = RuntimeSettings(settings.tunable())
+    both = [Detection("dog", 0.9, (0, 0, 100, 180)),
+            Detection("person", 0.9, (2, 2, 98, 178))]
+    status = StatusStore()
+    pipe = Pipeline(
+        settings=settings, detector=StubDetector([both, both]),
+        camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
+        alerter=FakeAlerter(), runtime=runtime, status=status,
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        safety=SafetyGovernor(runtime, tmp_path), clock=lambda: 0.0,
+        rng=random.Random(0),
+    )
+    frame = np.zeros((200, 200, 3), np.uint8)
+    fired = [pipe.run_once(frame) for _ in range(2)]
+    assert not any(fired)
+    assert status.snapshot().dogs == 0
+    assert status.snapshot().people == 1
+
+
+def test_pipeline_real_dog_near_person_still_fires(tmp_path):
+    # dog has its own distinct box that only clips the person -> low IoU -> fires
+    settings = Settings(confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5,
+                        person_suppression_enabled=True, person_iou_threshold=0.85,
+                        confidence=0.5)
+    runtime = RuntimeSettings(settings.tunable())
+    both = [Detection("dog", 0.9, (150, 150, 190, 190)),
+            Detection("person", 0.9, (0, 0, 100, 200))]
+    alerter = FakeAlerter()
+    status = StatusStore()
+    pipe = Pipeline(
+        settings=settings, detector=StubDetector([both, both]),
+        camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
+        alerter=alerter, runtime=runtime, status=status,
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        safety=SafetyGovernor(runtime, tmp_path), clock=lambda: 0.0,
+        rng=random.Random(0),
+    )
+    frame = np.zeros((200, 200, 3), np.uint8)
+    fired = [pipe.run_once(frame) for _ in range(2)]  # first sighting never fires
+    assert fired[1] is True
+    assert status.snapshot().dogs == 1
+    assert alerter.calls == 1
+
+
 def test_annotate_draws_zone_polygon():
     from doggy.pipeline import annotate
     frame = np.zeros((100, 100, 3), np.uint8)
