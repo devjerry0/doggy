@@ -25,6 +25,10 @@ class TunableSettings(BaseModel):
     zone_enabled: bool = False
     zone_points: list[tuple[float, float]] = Field(default_factory=list)
     detect_interval_seconds: float = Field(0.7, ge=0.0)
+    thermal_enabled: bool = True
+    thermal_target_c: float = Field(74.0, ge=0.0)
+    thermal_max_c: float = Field(82.0, ge=0.0)
+    thermal_cooldown_interval_seconds: float = Field(1.5, ge=0.0)
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "TunableSettings":
@@ -32,6 +36,8 @@ class TunableSettings(BaseModel):
             raise ValueError("window_m must be <= window_n")
         if self.cooldown_min_seconds > self.cooldown_max_seconds:
             raise ValueError("cooldown_min_seconds must be <= cooldown_max_seconds")
+        if self.thermal_target_c > self.thermal_max_c:
+            raise ValueError("thermal_target_c must be <= thermal_max_c")
         return self
 
 
