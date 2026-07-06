@@ -29,6 +29,8 @@ class TunableSettings(BaseModel):
     thermal_target_c: float = Field(74.0, ge=0.0)
     thermal_max_c: float = Field(82.0, ge=0.0)
     thermal_cooldown_interval_seconds: float = Field(1.5, ge=0.0)
+    event_retention_max: int = Field(500, ge=0)   # 0 = unlimited
+    event_retention_days: int = Field(30, ge=0)    # 0 = no age limit
     person_suppression_enabled: bool = True
     # A "dog" whose box overlaps a person's by at least this IoU is treated as a
     # misclassified person and suppressed (not fired on). High by design.
