@@ -88,3 +88,27 @@ def test_sustained_dog_fires_once_m_of_n_met():
     for ts in [0.0, 0.33, 0.67, 1.0]:
         fired = t.update(DOG, now=ts)
     assert fired is True  # 4 dog frames -> m_of_n (4>=4) and 1.0>=1.0
+
+
+def test_fire_confidence_is_window_peak_not_fire_edge_frame():
+    # Repro of the "conf 0" bug: with M-of-N flicker tolerance the trigger can
+    # fire on a frame that currently has NO dog. fire_confidence must still report
+    # the peak confidence that confirmed the fire, not the empty fire-edge frame.
+    t = make()  # window_m=2, window_n=3, confirm_seconds=1.0
+    high = [Detection(label="dog", confidence=0.9, box=(0, 0, 10, 10))]
+    assert t.update(high, now=0.0) is False
+    assert t.update(high, now=0.5) is False
+    fired = t.update(NONE, now=1.0)   # fires on an empty (flicker) frame
+    assert fired is True
+    assert t.fire_confidence == 0.9
+
+
+def test_fire_confidence_tracks_max_across_confirm_window():
+    # peak of the confirming frames (0.72, 0.95, 0.8) is what gets reported
+    t = make()
+    def dog(c):
+        return [Detection(label="dog", confidence=c, box=(0, 0, 10, 10))]
+    assert t.update(dog(0.72), now=0.0) is False
+    assert t.update(dog(0.95), now=0.5) is False
+    assert t.update(dog(0.80), now=1.0) is True
+    assert t.fire_confidence == 0.95

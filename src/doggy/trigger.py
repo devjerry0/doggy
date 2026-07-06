@@ -27,12 +27,20 @@ class TriggerLogic:
         self._confirm_start: float = 0.0
         self._cooldown_until: float = 0.0
         self._window: deque[bool] = deque()
+        self._confirm_max: float = 0.0
+        # Confidence of the detection that caused the most recent fire; read by
+        # the pipeline to log the event. Valid only immediately after update()
+        # returns True.
+        self.fire_confidence: float = 0.0
 
     def update(self, detections: list[Detection], now: float) -> bool:
         cfg = self._runtime.get()
-        has_dog = any(
-            d.label == TARGET_LABEL and d.confidence >= cfg.confidence for d in detections
-        )
+        frame_confs = [
+            d.confidence for d in detections
+            if d.label == TARGET_LABEL and d.confidence >= cfg.confidence
+        ]
+        has_dog = bool(frame_confs)
+        frame_max = max(frame_confs, default=0.0)
 
         self._window.append(has_dog)
         while len(self._window) > cfg.window_n:
@@ -49,9 +57,13 @@ class TriggerLogic:
             if has_dog:
                 self.state = TriggerState.CONFIRMING
                 self._confirm_start = now
+                self._confirm_max = frame_max
             return False
 
-        # CONFIRMING
+        # CONFIRMING. Track the peak confidence seen while confirming so the fire
+        # reports the detection that actually triggered it -- not whatever is in
+        # the frame on the fire edge, which can be empty after an M-of-N flicker.
+        self._confirm_max = max(self._confirm_max, frame_max)
         if len(self._window) >= cfg.window_n and not m_of_n:
             self.state = TriggerState.IDLE
             return False
@@ -60,5 +72,6 @@ class TriggerLogic:
                 cfg.cooldown_min_seconds, cfg.cooldown_max_seconds
             )
             self.state = TriggerState.COOLDOWN
+            self.fire_confidence = self._confirm_max
             return True
         return False

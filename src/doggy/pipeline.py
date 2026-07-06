@@ -94,7 +94,10 @@ class Pipeline:
         muted = not self.safety.allow_fire(now)
         if fired and not muted:
             self.alerter.alert()
-            event = self.safety.record_fire(frame, top, now)
+            # Log the confidence that actually triggered the fire (peak over the
+            # confirm window), not this frame's `top` -- the fire edge can land on
+            # a flicker frame with no current detection, which logged "conf 0".
+            event = self.safety.record_fire(frame, self.trigger.fire_confidence, now)
             self.status.add_event(event)
             self.status.update(last_fire_ts=event["ts"], last_fire_thumb=event["thumb"])
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
