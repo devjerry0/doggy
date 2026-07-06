@@ -65,6 +65,9 @@ class Status:
     muted: bool = False
     temp_c: float | None = None
     detect_interval_effective: float = 0.0
+    # Power health from vcgencmd get_throttled; None = unreadable (non-Pi).
+    undervolt_now: bool | None = None
+    undervolt_since_boot: bool | None = None
 
 
 _DEFAULT_MAX_EVENTS = 50  # recent fire events retained for the dashboard

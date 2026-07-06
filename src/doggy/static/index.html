@@ -2,40 +2,72 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#111" />
 <title>doggy</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #111; color: #eee; }
-  h1 { font-size: 1.3rem; } img { max-width: 100%; border: 2px solid #333; border-radius: 8px; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #111; color: #eee;
+         -webkit-tap-highlight-color: transparent;
+         padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+  img { max-width: 100%; border: 2px solid #333; border-radius: 8px; }
   .row { display: flex; gap: 2rem; flex-wrap: wrap; }
   .panel { flex: 1; min-width: 280px; }
+  #vidwrap { position: relative; display: block; width: 100%; line-height: 0; }
+  #live { display: block; width: 100%; }
+  #zonecanvas { position: absolute; left: 0; top: 0; cursor: crosshair;
+                touch-action: manipulation; }
   label { display: block; margin: .6rem 0 .2rem; font-size: .85rem; color: #aaa; }
-  input[type=range] { width: 100%; }
-  .stat { font-size: 1.5rem; } .muted { color: #f66; }
-  button { margin-top: 1rem; padding: .5rem 1rem; border: 0; border-radius: 6px;
-           background: #2a7; color: #041; font-weight: 600; cursor: pointer; }
+  input[type=range] { width: 100%; height: 1.9rem; touch-action: pan-y; }
+  .stat { font-size: 1.5rem; }
+  .statline { display: flex; flex-wrap: wrap; gap: .2rem .7rem; font-size: .9rem; margin: .3rem 0 .5rem; }
+  .muted { color: #f66; }
+  .checkrow { display: flex; align-items: center; gap: .5rem; margin-top: .8rem; font-size: .95rem; }
+  .checkrow input { width: 1.15rem; height: 1.15rem; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; align-items: center; }
+  button { padding: .6rem 1.1rem; border: 0; border-radius: 6px;
+           background: #2a7; color: #041; font-weight: 600; cursor: pointer;
+           font-size: 1rem; touch-action: manipulation; }
+  #zonehint { font-size: .8rem; color: #aaa; }
   #events { font-size: .8rem; color: #999; max-height: 8rem; overflow: auto; }
+
+  @media (max-width: 640px) {
+    body { margin: .75rem; }
+    .row { gap: 1.25rem; }
+    h1 { font-size: 1.15rem; }
+    .stat { font-size: 1.3rem; }
+    label { margin-top: .8rem; }
+    input[type=range] { height: 2.2rem; }
+    .btnrow button { flex: 1 1 8rem; padding: .8rem 1rem; }
+  }
 </style>
 </head>
 <body>
 <h1>🐕 doggy dashboard</h1>
 <div class="row">
   <div class="panel">
-    <div id="vidwrap" style="position:relative; display:inline-block;">
+    <div id="vidwrap">
       <img id="live" src="/stream.mjpg" alt="live" />
-      <canvas id="zonecanvas" style="position:absolute; left:0; top:0; cursor:crosshair;"></canvas>
+      <canvas id="zonecanvas"></canvas>
     </div>
-    <div>
+    <div class="btnrow">
       <button onclick="finishZone()">Finish zone</button>
       <button onclick="clearZone()">Clear zone</button>
-      <span id="zonehint" style="font-size:.8rem;color:#aaa;">click to place zone points</span>
+      <span id="zonehint">tap to place zone points</span>
     </div>
   </div>
   <div class="panel">
     <div class="stat">State: <span id="state">–</span></div>
-    <div>FPS: <span id="fps">–</span> · dogs: <span id="dogs">–</span>
-         · conf: <span id="conf">–</span>
-         · fires/hr: <span id="fires">–</span>
-         · 🌡️ <span id="temp">–</span>°C <span id="cooling"></span> <span id="muted"></span></div>
+    <div class="statline">
+      <span>FPS: <span id="fps">–</span></span>
+      <span>dogs: <span id="dogs">–</span></span>
+      <span>conf: <span id="conf">–</span></span>
+      <span>fires/hr: <span id="fires">–</span></span>
+      <span>🌡️ <span id="temp">–</span>°C <span id="cooling"></span> <span id="muted"></span></span>
+      <span title="Pi power health from under-voltage flags">⚡ <span id="power">–</span></span>
+    </div>
     <label>confidence <span id="confidence_v"></span></label>
     <input id="confidence" type="range" min="0" max="1" step="0.01" />
     <label>confirm_seconds <span id="confirm_seconds_v"></span></label>
@@ -52,8 +84,8 @@
     <input id="max_fires_per_hour" type="range" min="0" max="60" step="1" />
     <label>detect_interval_seconds <span id="detect_interval_seconds_v"></span></label>
     <input id="detect_interval_seconds" type="range" min="0" max="3" step="0.1" />
-    <label><input id="safety_enabled" type="checkbox" /> safety enabled</label>
-    <div>
+    <label class="checkrow"><input id="safety_enabled" type="checkbox" /> safety enabled</label>
+    <div class="btnrow">
       <button onclick="testSound()">Test sound</button>
       <button onclick="save()">Save to .env</button>
     </div>
@@ -87,6 +119,13 @@ async function poll(){
   document.getElementById("temp").textContent = s.temp_c == null ? "–" : s.temp_c.toFixed(1);
   const cooling = s.detect_interval_effective > s.settings.detect_interval_seconds;
   document.getElementById("cooling").innerHTML = cooling ? '<span style="color:#fa0">COOLING</span>' : '';
+  let pTxt = "–", pColor = "#888", pTip = "power state unavailable (not a Pi?)";
+  if (s.undervolt_now === true){ pTxt = "UNDER-VOLT"; pColor = "#f55"; pTip = "supply is below spec RIGHT NOW — fix the power source"; }
+  else if (s.undervolt_since_boot === true){ pTxt = "dipped"; pColor = "#fa0"; pTip = "voltage OK now, but dipped below spec at least once since boot"; }
+  else if (s.undervolt_now === false){ pTxt = "OK"; pColor = "#3fbf7f"; pTip = "no under-voltage now or since boot"; }
+  const pEl = document.getElementById("power");
+  pEl.innerHTML = `<span style="color:${pColor}">${pTxt}</span>`;
+  pEl.parentElement.title = pTip;
   for (const k of KNOBS){
     const el = document.getElementById(k);
     if (document.activeElement !== el){ el.value = s.settings[k]; }
@@ -107,6 +146,7 @@ let drawing = [];         // in-progress points, normalized [0,1]
 function sizeCanvas(){ canvas.width = img.clientWidth; canvas.height = img.clientHeight; }
 img.addEventListener("load", sizeCanvas);
 window.addEventListener("resize", () => { sizeCanvas(); });
+window.addEventListener("orientationchange", () => { setTimeout(sizeCanvas, 200); });
 canvas.addEventListener("click", e => {
   const r = img.getBoundingClientRect();
   drawing.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);

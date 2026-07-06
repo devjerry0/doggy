@@ -15,6 +15,7 @@ from doggy.config import Settings
 from doggy.detection import Detection
 from doggy.detector import Detector
 from doggy.pacer import Pacer
+from doggy.power import PowerMonitor
 from doggy.safety import SafetyGovernor
 from doggy.state import CONFIDENCE_DECIMALS, FrameBuffer, RuntimeSettings, StatusStore
 from doggy.thermal import ThermalGovernor
@@ -78,6 +79,7 @@ class Pipeline:
         self.zone = ZoneFilter()
         self.pacer = Pacer(clock=clock)
         self.governor = ThermalGovernor()
+        self.power = PowerMonitor(clock=clock)
 
     def run_once(self, frame: np.ndarray) -> bool:
         """Process a single frame: detect, annotate, trigger, maybe fire."""
@@ -122,7 +124,12 @@ class Pipeline:
             cfg = self.runtime.get()
             temp = self.governor.read_temp_c()
             interval = self.governor.effective_interval(temp, cfg)
-            self.status.update(temp_c=temp, detect_interval_effective=interval)
+            power = self.power.read()
+            self.status.update(
+                temp_c=temp, detect_interval_effective=interval,
+                undervolt_now=power.undervolt_now if power else None,
+                undervolt_since_boot=power.undervolt_since_boot if power else None,
+            )
             self.pacer.wait(interval)
             self.run_once(frame)
             now = self.clock()
