@@ -99,6 +99,8 @@ Type=simple
 User=$(whoami)
 WorkingDirectory=$HOME/$REMOTE_DIR
 EnvironmentFile=$HOME/$REMOTE_DIR/.env
+# pw-play (command alerter) needs the user's runtime dir to reach PipeWire/BT
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u)
 ExecStart=$(command -v uv) run doggy
 # always (not on-failure): the app exits 0 when the camera is missing, so it
 # must relaunch until the webcam is present / reconnected. Appliance resilience.

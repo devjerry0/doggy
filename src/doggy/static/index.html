@@ -39,6 +39,10 @@
     <input id="confidence" type="range" min="0" max="1" step="0.01" />
     <label>confirm_seconds <span id="confirm_seconds_v"></span></label>
     <input id="confirm_seconds" type="range" min="0" max="5" step="0.1" />
+    <label>window_m — dog-frames needed <span id="window_m_v"></span></label>
+    <input id="window_m" type="range" min="1" max="10" step="1" />
+    <label>window_n — of the last N frames (m ≤ n) <span id="window_n_v"></span></label>
+    <input id="window_n" type="range" min="1" max="10" step="1" />
     <label>cooldown_min_seconds <span id="cooldown_min_seconds_v"></span></label>
     <input id="cooldown_min_seconds" type="range" min="0" max="60" step="1" />
     <label>cooldown_max_seconds <span id="cooldown_max_seconds_v"></span></label>
@@ -57,7 +61,7 @@
   </div>
 </div>
 <script>
-const KNOBS = ["confidence","confirm_seconds","cooldown_min_seconds",
+const KNOBS = ["confidence","confirm_seconds","window_m","window_n","cooldown_min_seconds",
                "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds"];
 async function patch(body){
   await fetch("/api/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},
