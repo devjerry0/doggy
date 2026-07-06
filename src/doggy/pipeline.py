@@ -122,7 +122,8 @@ class Pipeline:
             self.status.update(last_fire_ts=record.ts, last_fire_thumb=record.thumb)
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
                            dogs=len(in_zone), people=len(people) if cfg.person_suppression_enabled else 0,
-                           fires_this_hour=self.safety.fires_last_hour(now), muted=muted)
+                           fires_this_hour=self.safety.fires_last_hour(now), muted=muted,
+                           snoozed_until_seconds=self.safety.snooze_remaining(now))
         return fired and not muted
 
     def _capture_loop(self, stop: threading.Event) -> None:

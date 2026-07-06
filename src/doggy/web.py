@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from doggy.alerter import Alerter
 from doggy.config import Settings, TunableSettings
 from doggy.events import EventRecord, EventStore
+from doggy.safety import SafetyGovernor
 from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
 
 _STATIC = Path(__file__).parent / "static"
@@ -80,7 +81,7 @@ def _write_env(tunable: TunableSettings, path: Path = Path(".env")) -> None:
 
 def create_app(settings: Settings, runtime: RuntimeSettings,
                annotated_buffer: FrameBuffer, status: StatusStore, alerter: Alerter,
-               event_store: EventStore,
+               event_store: EventStore, safety: SafetyGovernor,
                save_env: Callable[[TunableSettings], None] = _write_env) -> FastAPI:
     app = FastAPI(title="doggy")
 
@@ -139,6 +140,17 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
         alerter.alert()
         return {"ok": True}
 
+    @app.post("/api/snooze")
+    def api_snooze(body: dict) -> dict:
+        # Monotonic clock so the snooze timeline matches the pipeline's allow_fire.
+        safety.snooze(float(body["minutes"]) * 60, time.monotonic())
+        return {"ok": True}
+
+    @app.post("/api/snooze/cancel")
+    def api_snooze_cancel() -> dict:
+        safety.cancel_snooze()
+        return {"ok": True}
+
     @app.post("/api/settings/save")
     def api_save() -> dict:
         save_env(runtime.get())
@@ -172,8 +184,8 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
 
 def serve(settings: Settings, runtime: RuntimeSettings,
           annotated_buffer: FrameBuffer, status: StatusStore, alerter: Alerter,
-          event_store: EventStore) -> None:
+          event_store: EventStore, safety: SafetyGovernor) -> None:
     import uvicorn
 
-    app = create_app(settings, runtime, annotated_buffer, status, alerter, event_store)
+    app = create_app(settings, runtime, annotated_buffer, status, alerter, event_store, safety)
     uvicorn.run(app, host=settings.web_host, port=settings.web_port, log_level="warning")

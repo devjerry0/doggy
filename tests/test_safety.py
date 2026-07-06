@@ -48,6 +48,17 @@ def test_record_fire_writes_thumbnail_and_log(tmp_path):
     assert event.confidence == 0.87
 
 
+def test_snooze_blocks_then_expires(tmp_path):
+    g = gov(tmp_path)
+    g.snooze(60, now=100.0)
+    assert g.allow_fire(now=100.0) is False
+    assert g.snooze_remaining(now=130.0) == 30.0
+    assert g.allow_fire(now=161.0) is True  # expired
+    g.snooze(60, now=200.0)
+    g.cancel_snooze()
+    assert g.allow_fire(now=200.0) is True
+
+
 def test_record_fire_delegates_to_store(tmp_path):
     from doggy.events import EventStore
     from doggy.config import Settings

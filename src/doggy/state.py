@@ -54,6 +54,7 @@ class Status:
     last_fire_ts: float | None = None
     last_fire_thumb: str | None = None
     muted: bool = False
+    snoozed_until_seconds: float = 0.0  # snooze remaining, set each loop
     temp_c: float | None = None
     detect_interval_effective: float = 0.0
     # Power health from vcgencmd get_throttled; None = unreadable (non-Pi).

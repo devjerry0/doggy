@@ -50,7 +50,7 @@ def main() -> None:
         from doggy.web import serve
         threading.Thread(
             target=serve,
-            args=(settings, runtime, annotated_buffer, status, alerter, event_store),
+            args=(settings, runtime, annotated_buffer, status, alerter, event_store, safety),
             daemon=True,
         ).start()
         log.info("dashboard at http://%s:%s", settings.web_host, settings.web_port)

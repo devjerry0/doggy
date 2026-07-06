@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from doggy.alerter import FakeAlerter
 from doggy.config import Settings
 from doggy.events import EventStore
+from doggy.safety import SafetyGovernor
 from doggy.state import FrameBuffer, RuntimeSettings, StatusStore
 from doggy.web import create_app
 
@@ -13,7 +14,8 @@ def client(tmp_path, saved=None):
     runtime = RuntimeSettings(settings.tunable())
     alerter = FakeAlerter()
     store = EventStore(tmp_path, 100, 0)
-    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), alerter, store,
+    safety = SafetyGovernor(runtime, store)
+    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), alerter, store, safety,
                      save_env=lambda t: saved.update(t.model_dump()) if saved is not None else None)
     return TestClient(app), runtime, alerter
 
@@ -71,7 +73,8 @@ def _app_with_events(tmp_path):
     settings = Settings(event_log_dir=tmp_path)
     runtime = RuntimeSettings(settings.tunable())
     store = EventStore(tmp_path, 100, 0)
-    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter(), store)
+    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter(), store,
+                     SafetyGovernor(runtime, store))
     return TestClient(app)
 
 
@@ -107,8 +110,9 @@ def test_write_env_roundtrips_zone_points(tmp_path, monkeypatch):
 def test_index_has_zone_controls(tmp_path):
     s = Settings(event_log_dir=tmp_path)
     store = EventStore(tmp_path, 100, 0)
-    app = create_app(s, RuntimeSettings(s.tunable()), FrameBuffer(), StatusStore(),
-                     FakeAlerter(), store)
+    runtime = RuntimeSettings(s.tunable())
+    app = create_app(s, runtime, FrameBuffer(), StatusStore(),
+                     FakeAlerter(), store, SafetyGovernor(runtime, store))
     html = TestClient(app).get("/").text
     assert "Save area" in html and "Clear area" in html
     assert "detect_interval_seconds" in html
@@ -117,8 +121,9 @@ def test_index_has_zone_controls(tmp_path):
 def test_index_has_temp_readout(tmp_path):
     s = Settings(event_log_dir=tmp_path)
     store = EventStore(tmp_path, 100, 0)
-    app = create_app(s, RuntimeSettings(s.tunable()), FrameBuffer(), StatusStore(),
-                     FakeAlerter(), store)
+    runtime = RuntimeSettings(s.tunable())
+    app = create_app(s, runtime, FrameBuffer(), StatusStore(),
+                     FakeAlerter(), store, SafetyGovernor(runtime, store))
     html = TestClient(app).get("/").text
     assert 'id="temp"' in html
     assert "Temperature" in html
@@ -136,7 +141,8 @@ def _seeded_store(tmp_path, n=2):
 def _app_with_store(tmp_path, store):
     settings = Settings(event_log_dir=tmp_path)
     runtime = RuntimeSettings(settings.tunable())
-    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter(), store)
+    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter(), store,
+                     SafetyGovernor(runtime, store))
     return TestClient(app)
 
 
@@ -183,3 +189,19 @@ def test_clips_route_serves_and_404(tmp_path):
     c = _app_with_store(tmp_path, store)
     assert c.get("/clips/clip.mp4").content == b"data"
     assert c.get("/clips/missing.mp4").status_code == 404
+
+
+def test_snooze_endpoint_blocks_then_cancel_re_allows(tmp_path):
+    import time
+    settings = Settings(event_log_dir=tmp_path)
+    runtime = RuntimeSettings(settings.tunable())
+    store = EventStore(tmp_path, 100, 0)
+    safety = SafetyGovernor(runtime, store)
+    app = create_app(settings, runtime, FrameBuffer(), StatusStore(), FakeAlerter(),
+                     store, safety)
+    c = TestClient(app)
+    assert safety.allow_fire(now=time.monotonic()) is True
+    assert c.post("/api/snooze", json={"minutes": 5}).json() == {"ok": True}
+    assert safety.allow_fire(now=time.monotonic()) is False  # snoozed
+    assert c.post("/api/snooze/cancel").json() == {"ok": True}
+    assert safety.allow_fire(now=time.monotonic()) is True   # re-armed
