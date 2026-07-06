@@ -3,161 +3,297 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#111" />
-<title>doggy</title>
+<meta name="theme-color" content="#0e1116" />
+<title>Counter Watch</title>
 <style>
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #111; color: #eee;
-         -webkit-tap-highlight-color: transparent;
-         padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
-  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
-  img { max-width: 100%; border: 2px solid #333; border-radius: 8px; }
-  .row { display: flex; gap: 2rem; flex-wrap: wrap; }
-  .panel { flex: 1; min-width: 280px; }
-  /* inline-block wrapper hugs the video at its native size (desktop) and caps
-     at the panel width via `img { max-width:100% }` (fills a phone screen when
-     stacked). The zone canvas overlays it and is JS-sized to the img. */
-  #vidwrap { position: relative; display: inline-block; line-height: 0; max-width: 100%; }
-  #zonecanvas { position: absolute; left: 0; top: 0; cursor: crosshair;
-                touch-action: manipulation; }
-  label { display: block; margin: .6rem 0 .2rem; font-size: .85rem; color: #aaa; }
-  input[type=range] { width: 100%; height: 1.9rem; touch-action: pan-y; }
-  .stat { font-size: 1.5rem; }
-  .statline { display: flex; flex-wrap: wrap; gap: .2rem .7rem; font-size: .9rem; margin: .3rem 0 .5rem; }
-  .muted { color: #f66; }
-  .checkrow { display: flex; align-items: center; gap: .5rem; margin-top: .8rem; font-size: .95rem; }
-  .checkrow input { width: 1.15rem; height: 1.15rem; }
-  .btnrow { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; align-items: center; }
-  button { padding: .6rem 1.1rem; border: 0; border-radius: 6px;
-           background: #2a7; color: #041; font-weight: 600; cursor: pointer;
-           font-size: 1rem; touch-action: manipulation; }
-  #zonehint { font-size: .8rem; color: #aaa; }
-  #events { font-size: .8rem; color: #999; max-height: 8rem; overflow: auto; }
+  :root{
+    --bg:#0e1116; --card:#171b22; --card2:#1e242d; --border:#2a313c;
+    --text:#e7eaf0; --muted:#9aa4b2; --accent:#4f8cff;
+    --ok:#3fbf7f; --warn:#f5a623; --alert:#ff5a5a;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.45;
+       -webkit-tap-highlight-color:transparent;
+       padding:env(safe-area-inset-top) 0 2rem}
+  .wrap{max-width:1040px;margin:0 auto;padding:1.25rem}
+  header{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+         flex-wrap:wrap;margin-bottom:1.25rem}
+  h1{font-size:1.25rem;font-weight:650;margin:0;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:.85rem;margin-top:.15rem}
+  .pill{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .8rem;border-radius:999px;
+        font-weight:600;font-size:.9rem;background:var(--card2);border:1px solid var(--border)}
+  .dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--muted)}
+  .pill.state-watching .dot{background:var(--ok)} .pill.state-watching{color:var(--ok)}
+  .pill.state-spotted .dot{background:var(--alert)} .pill.state-spotted{color:var(--alert)}
+  .pill.state-cooling .dot{background:var(--warn)} .pill.state-cooling{color:var(--warn)}
 
-  @media (max-width: 640px) {
-    body { margin: .75rem; }
-    .row { gap: 1.25rem; }
-    h1 { font-size: 1.15rem; }
-    .stat { font-size: 1.3rem; }
-    label { margin-top: .8rem; }
-    input[type=range] { height: 2.2rem; }
-    .btnrow button { flex: 1 1 8rem; padding: .8rem 1rem; }
+  .grid{display:flex;gap:1.25rem;flex-wrap:wrap;align-items:flex-start}
+  .col-live{flex:1 1 440px;min-width:300px}
+  .col-side{flex:1 1 320px;min-width:280px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+        padding:1.1rem;margin-bottom:1.25rem}
+  .card h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+           font-weight:600;margin:0 0 .9rem}
+
+  #vidwrap{position:relative;display:inline-block;line-height:0;max-width:100%;
+           border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+  #live{max-width:100%;display:block}
+  #zonecanvas{position:absolute;left:0;top:0;cursor:crosshair;touch-action:manipulation}
+  .hint{color:var(--muted);font-size:.8rem;margin-top:.5rem}
+
+  .btnrow{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.9rem;align-items:center}
+  button{font:inherit;font-weight:600;font-size:.9rem;padding:.6rem 1rem;border-radius:9px;
+         border:1px solid var(--border);background:var(--card2);color:var(--text);cursor:pointer;
+         touch-action:manipulation;transition:border-color .15s,background .15s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#04122e}
+
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:.85rem}
+  .stat .k{color:var(--muted);font-size:.78rem}
+  .stat .v{font-size:1.55rem;font-weight:650;line-height:1.15;margin-top:.1rem}
+
+  .field{margin:1.1rem 0}
+  .field:first-child{margin-top:.2rem}
+  .field .row{display:flex;justify-content:space-between;align-items:baseline;gap:.75rem}
+  .field label{font-size:.92rem;font-weight:550}
+  .field .val{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:650;font-size:.9rem}
+  .field .desc{color:var(--muted);font-size:.78rem;margin-top:.15rem}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:999px;
+                    background:#333c49;margin-top:.7rem;touch-action:pan-y}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+                    background:var(--accent);cursor:pointer;border:3px solid var(--card)}
+  input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;background:var(--accent);cursor:pointer}
+
+  .toggle{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.9rem 0}
+  .toggle .t-label{font-size:.95rem;font-weight:550}
+  .toggle .t-desc{color:var(--muted);font-size:.78rem;margin-top:.15rem}
+  .switch{position:relative;display:inline-block;width:46px;height:27px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .track{position:absolute;inset:0;background:#39414d;border-radius:999px;cursor:pointer;transition:.2s}
+  .track::before{content:"";position:absolute;height:21px;width:21px;left:3px;top:3px;background:#fff;
+                 border-radius:50%;transition:.2s}
+  .switch input:checked + .track{background:var(--ok)}
+  .switch input:checked + .track::before{transform:translateX(19px)}
+
+  details{border-top:1px solid var(--border);margin-top:.4rem}
+  details summary{cursor:pointer;list-style:none;padding:.9rem 0 .3rem;color:var(--muted);
+                  font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  details summary::-webkit-details-marker{display:none}
+  details summary::after{content:" ▾";color:var(--muted)}
+  details[open] summary::after{content:" ▴"}
+
+  .sys{display:flex;flex-wrap:wrap;gap:.4rem 1.5rem}
+  .sys .k{color:var(--muted);font-size:.8rem}
+  .sys .v{font-weight:600;font-size:.9rem}
+  .sys .v.good{color:var(--ok)} .sys .v.warn{color:var(--warn)} .sys .v.bad{color:var(--alert)}
+
+  .events{display:flex;flex-direction:column;gap:.55rem}
+  .events .ev{display:flex;align-items:center;gap:.7rem}
+  .events img{height:44px;width:58px;object-fit:cover;border-radius:6px;border:1px solid var(--border)}
+  .events .ev .c{font-weight:600;font-size:.92rem}
+  .events .empty{color:var(--muted);font-size:.85rem}
+
+  @media(max-width:640px){
+    .wrap{padding:.9rem}
+    .stat .v{font-size:1.35rem}
+    button{flex:1 1 8rem;padding:.75rem 1rem}
+    input[type=range]{height:8px}
   }
 </style>
 </head>
 <body>
-<h1>🐕 doggy dashboard</h1>
-<div class="row">
-  <div class="panel">
-    <div id="vidwrap">
-      <img id="live" src="/stream.mjpg" alt="live" />
-      <canvas id="zonecanvas"></canvas>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Counter Watch</h1>
+      <div class="sub">Keeps the dog off the kitchen counter</div>
     </div>
-    <div class="btnrow">
-      <button onclick="finishZone()">Finish zone</button>
-      <button onclick="clearZone()">Clear zone</button>
-      <span id="zonehint">tap to place zone points</span>
+    <div class="pill" id="statepill"><span class="dot"></span><span id="statetext">–</span></div>
+  </header>
+
+  <div class="grid">
+    <div class="col-live">
+      <div class="card">
+        <h2>Live view</h2>
+        <div id="vidwrap">
+          <img id="live" src="/stream.mjpg" alt="live camera" />
+          <canvas id="zonecanvas"></canvas>
+        </div>
+        <div class="hint">The shaded shape is the <b>watch area</b> — the dog is only acted on inside it. Tap the picture to place corners around the counter.</div>
+        <div class="btnrow">
+          <button onclick="finishZone()">Save area</button>
+          <button onclick="clearZone()">Clear area</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Right now</h2>
+        <div class="stats">
+          <div class="stat"><div class="k">Dogs in view</div><div class="v" id="dogs">–</div></div>
+          <div class="stat"><div class="k">People in view</div><div class="v" id="people">–</div></div>
+          <div class="stat"><div class="k">Certainty it's a dog</div><div class="v" id="conf">–</div></div>
+          <div class="stat"><div class="k">Reactions this hour</div><div class="v" id="fires">–</div></div>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="panel">
-    <div class="stat">State: <span id="state">–</span></div>
-    <div class="statline">
-      <span>FPS: <span id="fps">–</span></span>
-      <span>dogs: <span id="dogs">–</span></span>
-      <span>people: <span id="people">–</span></span>
-      <span>conf: <span id="conf">–</span></span>
-      <span>fires/hr: <span id="fires">–</span></span>
-      <span>🌡️ <span id="temp">–</span>°C <span id="cooling"></span> <span id="muted"></span></span>
-      <span title="Pi power health from under-voltage flags">⚡ <span id="power">–</span></span>
+
+    <div class="col-side">
+      <div class="card">
+        <h2>Settings</h2>
+
+        <div class="toggle">
+          <div><div class="t-label">Deterrent</div><div class="t-desc">Play the sound when a dog is confirmed</div></div>
+          <label class="switch"><input id="safety_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="toggle">
+          <div><div class="t-label">Ignore people</div><div class="t-desc">Don't react to a person mistaken for a dog</div></div>
+          <label class="switch"><input id="person_suppression_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+
+        <div class="field">
+          <div class="row"><label>How sure it must be it's a dog</label><span class="val" id="confidence_v"></span></div>
+          <div class="desc">Higher means fewer false alarms, but it may miss a quick visit.</div>
+          <input id="confidence" type="range" min="0" max="1" step="0.01" />
+        </div>
+        <div class="field">
+          <div class="row"><label>How long the dog must stay before reacting</label><span class="val" id="confirm_seconds_v"></span></div>
+          <input id="confirm_seconds" type="range" min="0" max="5" step="0.1" />
+        </div>
+        <div class="field">
+          <div class="row"><label>Wait between reactions — at least</label><span class="val" id="cooldown_min_seconds_v"></span></div>
+          <input id="cooldown_min_seconds" type="range" min="0" max="60" step="1" />
+        </div>
+        <div class="field">
+          <div class="row"><label>Wait between reactions — at most</label><span class="val" id="cooldown_max_seconds_v"></span></div>
+          <input id="cooldown_max_seconds" type="range" min="0" max="120" step="1" />
+        </div>
+        <div class="field">
+          <div class="row"><label>Most reactions per hour</label><span class="val" id="max_fires_per_hour_v"></span></div>
+          <input id="max_fires_per_hour" type="range" min="0" max="60" step="1" />
+        </div>
+
+        <div class="btnrow">
+          <button class="primary" onclick="save()">Save settings</button>
+          <button onclick="testSound()">Test sound</button>
+        </div>
+
+        <details>
+          <summary>Advanced</summary>
+          <div class="field">
+            <div class="row"><label>Must be seen in at least this many of the last few checks</label><span class="val" id="window_m_v"></span></div>
+            <input id="window_m" type="range" min="1" max="10" step="1" />
+          </div>
+          <div class="field">
+            <div class="row"><label>…out of this many recent checks</label><span class="val" id="window_n_v"></span></div>
+            <input id="window_n" type="range" min="1" max="10" step="1" />
+          </div>
+          <div class="field">
+            <div class="row"><label>How often it looks at the camera</label><span class="val" id="detect_interval_seconds_v"></span></div>
+            <input id="detect_interval_seconds" type="range" min="0" max="3" step="0.1" />
+          </div>
+          <div class="field">
+            <div class="row"><label>How closely a dog must match a person to be ignored</label><span class="val" id="person_iou_threshold_v"></span></div>
+            <input id="person_iou_threshold" type="range" min="0" max="1" step="0.01" />
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>Recent reactions</h2>
+        <div class="events" id="events"></div>
+      </div>
+
+      <div class="card">
+        <h2>System</h2>
+        <div class="sys">
+          <span><span class="k">Temperature</span> <span class="v" id="temp">–</span></span>
+          <span><span class="k">Power</span> <span class="v" id="power">–</span></span>
+          <span><span class="k">Speed</span> <span class="v" id="fps">–</span></span>
+        </div>
+      </div>
     </div>
-    <label>confidence <span id="confidence_v"></span></label>
-    <input id="confidence" type="range" min="0" max="1" step="0.01" />
-    <label>confirm_seconds <span id="confirm_seconds_v"></span></label>
-    <input id="confirm_seconds" type="range" min="0" max="5" step="0.1" />
-    <label>window_m — dog-frames needed <span id="window_m_v"></span></label>
-    <input id="window_m" type="range" min="1" max="10" step="1" />
-    <label>window_n — of the last N frames (m ≤ n) <span id="window_n_v"></span></label>
-    <input id="window_n" type="range" min="1" max="10" step="1" />
-    <label>cooldown_min_seconds <span id="cooldown_min_seconds_v"></span></label>
-    <input id="cooldown_min_seconds" type="range" min="0" max="60" step="1" />
-    <label>cooldown_max_seconds <span id="cooldown_max_seconds_v"></span></label>
-    <input id="cooldown_max_seconds" type="range" min="0" max="120" step="1" />
-    <label>max_fires_per_hour <span id="max_fires_per_hour_v"></span></label>
-    <input id="max_fires_per_hour" type="range" min="0" max="60" step="1" />
-    <label>detect_interval_seconds <span id="detect_interval_seconds_v"></span></label>
-    <input id="detect_interval_seconds" type="range" min="0" max="3" step="0.1" />
-    <label class="checkrow"><input id="safety_enabled" type="checkbox" /> safety enabled</label>
-    <label class="checkrow"><input id="person_suppression_enabled" type="checkbox" /> suppress people mistaken for dogs</label>
-    <label>person_iou_threshold <span id="person_iou_threshold_v"></span></label>
-    <input id="person_iou_threshold" type="range" min="0" max="1" step="0.01" />
-    <div class="btnrow">
-      <button onclick="testSound()">Test sound</button>
-      <button onclick="save()">Save to .env</button>
-    </div>
-    <h3>Recent fires</h3>
-    <div id="events"></div>
   </div>
 </div>
+
 <script>
 const KNOBS = ["confidence","confirm_seconds","window_m","window_n","cooldown_min_seconds",
                "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds",
                "person_iou_threshold"];
+const pct = v => Math.round(v * 100) + "%";
+const secs = v => (Math.round(v * 10) / 10) + "s";
+const FMT = {confidence:pct, person_iou_threshold:pct, confirm_seconds:secs,
+             cooldown_min_seconds:secs, cooldown_max_seconds:secs, detect_interval_seconds:secs};
+const fmt = (k, v) => (FMT[k] || String)(v);
+const STATE = {IDLE:["Watching","state-watching"], CONFIRMING:["Dog spotted","state-spotted"],
+               COOLDOWN:["Cooling down","state-cooling"]};
+
 async function patch(body){
   await fetch("/api/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
 }
 KNOBS.forEach(k => {
   const el = document.getElementById(k);
+  el.addEventListener("input", () => document.getElementById(k+"_v").textContent = fmt(k, parseFloat(el.value)));
   el.addEventListener("change", () => patch({[k]: parseFloat(el.value)}));
 });
-document.getElementById("safety_enabled").addEventListener("change", e =>
-  patch({safety_enabled: e.target.checked}));
+document.getElementById("safety_enabled").addEventListener("change", e => patch({safety_enabled:e.target.checked}));
 document.getElementById("person_suppression_enabled").addEventListener("change", e =>
-  patch({person_suppression_enabled: e.target.checked}));
+  patch({person_suppression_enabled:e.target.checked}));
 async function testSound(){ await fetch("/api/test-sound",{method:"POST"}); }
-async function save(){ await fetch("/api/settings/save",{method:"POST"}); }
+async function save(){
+  const b = document.querySelector("button.primary"); const t = b.textContent;
+  await fetch("/api/settings/save",{method:"POST"}); b.textContent = "Saved"; setTimeout(()=>b.textContent=t, 1200);
+}
+
 async function poll(){
   const s = await (await fetch("/api/status")).json();
-  document.getElementById("state").textContent = s.state;
-  document.getElementById("fps").textContent = s.fps;
-  document.getElementById("conf").textContent = s.confidence;
+  const [word, cls] = STATE[s.state] || [s.state, ""];
+  document.getElementById("statetext").textContent = word;
+  document.getElementById("statepill").className = "pill " + cls;
   document.getElementById("dogs").textContent = s.dogs;
   document.getElementById("people").textContent = s.people;
+  document.getElementById("conf").textContent = s.confidence ? pct(s.confidence) : "–";
   document.getElementById("fires").textContent = s.fires_this_hour;
-  document.getElementById("muted").innerHTML = s.muted ? '<span class="muted">MUTED</span>' : '';
-  document.getElementById("temp").textContent = s.temp_c == null ? "–" : s.temp_c.toFixed(1);
+
+  // System
   const cooling = s.detect_interval_effective > s.settings.detect_interval_seconds;
-  document.getElementById("cooling").innerHTML = cooling ? '<span style="color:#fa0">COOLING</span>' : '';
-  let pTxt = "–", pColor = "#888", pTip = "power state unavailable (not a Pi?)";
-  if (s.undervolt_now === true){ pTxt = "UNDER-VOLT"; pColor = "#f55"; pTip = "supply is below spec RIGHT NOW — fix the power source"; }
-  else if (s.undervolt_since_boot === true){ pTxt = "dipped"; pColor = "#fa0"; pTip = "voltage OK now, but dipped below spec at least once since boot"; }
-  else if (s.undervolt_now === false){ pTxt = "OK"; pColor = "#3fbf7f"; pTip = "no under-voltage now or since boot"; }
+  const tEl = document.getElementById("temp");
+  tEl.textContent = (s.temp_c == null ? "–" : s.temp_c.toFixed(0) + "°C") + (cooling ? " · easing off" : "");
+  tEl.className = "v" + (s.temp_c == null ? "" : s.temp_c >= 80 ? " bad" : s.temp_c >= 74 ? " warn" : " good");
   const pEl = document.getElementById("power");
-  pEl.innerHTML = `<span style="color:${pColor}">${pTxt}</span>`;
-  pEl.parentElement.title = pTip;
+  if (s.undervolt_now === true){ pEl.textContent = "Under-voltage"; pEl.className = "v bad"; }
+  else if (s.undervolt_since_boot === true){ pEl.textContent = "Dipped earlier"; pEl.className = "v warn"; }
+  else if (s.undervolt_now === false){ pEl.textContent = "OK"; pEl.className = "v good"; }
+  else { pEl.textContent = "–"; pEl.className = "v"; }
+  document.getElementById("fps").textContent = s.fps ? s.fps + "/s" : "–";
+
   for (const k of KNOBS){
     const el = document.getElementById(k);
     if (document.activeElement !== el){ el.value = s.settings[k]; }
-    document.getElementById(k+"_v").textContent = s.settings[k];
+    document.getElementById(k+"_v").textContent = fmt(k, s.settings[k]);
   }
   document.getElementById("safety_enabled").checked = s.settings.safety_enabled;
   document.getElementById("person_suppression_enabled").checked = s.settings.person_suppression_enabled;
-  document.getElementById("events").innerHTML =
-    s.events.slice(-10).reverse().map(e =>
-      `<div style="margin:.2rem 0"><img src="/events/${e.thumb}" alt="" ` +
-      `style="height:38px;vertical-align:middle;border-radius:4px;margin-right:.4rem">` +
-      `${e.ts.toFixed(1)}s · conf ${e.confidence}</div>`).join("");
+
+  const evs = s.events.slice(-10).reverse();
+  document.getElementById("events").innerHTML = evs.length
+    ? evs.map(e => `<div class="ev"><img src="/events/${e.thumb}" alt="">`+
+        `<span class="c">${pct(e.confidence)} sure it was a dog</span></div>`).join("")
+    : '<div class="empty">No reactions yet.</div>';
+
   if (drawing.length === 0 && s.settings.zone_enabled){ drawZone(s.settings.zone_points, false); }
 }
+
 const img = document.getElementById("live");
 const canvas = document.getElementById("zonecanvas");
 const ctx = canvas.getContext("2d");
-let drawing = [];         // in-progress points, normalized [0,1]
+let drawing = [];
 function sizeCanvas(){ canvas.width = img.clientWidth; canvas.height = img.clientHeight; }
 img.addEventListener("load", sizeCanvas);
-window.addEventListener("resize", () => { sizeCanvas(); });
-window.addEventListener("orientationchange", () => { setTimeout(sizeCanvas, 200); });
+window.addEventListener("resize", sizeCanvas);
+window.addEventListener("orientationchange", () => setTimeout(sizeCanvas, 200));
 canvas.addEventListener("click", e => {
   const r = img.getBoundingClientRect();
   drawing.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]);
@@ -167,24 +303,26 @@ function drawZone(points, inProgress){
   sizeCanvas();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!points.length) return;
-  ctx.strokeStyle = inProgress ? "#0af" : "#fa0";
+  ctx.fillStyle = "rgba(79,140,255,0.18)";
+  ctx.strokeStyle = inProgress ? "#79a8ff" : "#4f8cff";
   ctx.lineWidth = 2; ctx.beginPath();
   points.forEach((p, i) => {
     const x = p[0] * canvas.width, y = p[1] * canvas.height;
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    ctx.fillStyle = "#0af"; ctx.fillRect(x - 3, y - 3, 6, 6);
   });
-  if (!inProgress) ctx.closePath();
+  if (!inProgress){ ctx.closePath(); ctx.fill(); }
   ctx.stroke();
+  ctx.fillStyle = "#79a8ff";
+  points.forEach(p => ctx.fillRect(p[0]*canvas.width - 3, p[1]*canvas.height - 3, 6, 6));
 }
 async function finishZone(){
-  if (drawing.length < 3){ alert("place at least 3 points"); return; }
-  await patch({zone_enabled: true, zone_points: drawing});
+  if (drawing.length < 3){ alert("Tap at least 3 points around the counter first."); return; }
+  await patch({zone_enabled:true, zone_points:drawing});
   drawing = [];
 }
 async function clearZone(){
   drawing = [];
-  await patch({zone_enabled: false, zone_points: []});
+  await patch({zone_enabled:false, zone_points:[]});
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 setInterval(poll, 500); poll();
