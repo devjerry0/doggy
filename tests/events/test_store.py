@@ -339,6 +339,45 @@ def test_report_card_no_outcome_clause_when_nothing_completed(tmp_path):
     assert rc["summary"] == "5 attempts, down from 9 last week."
 
 
+def test_report_card_equal_weeks_get_no_trend_adjustment(tmp_path):
+    now = 1893456000.0
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    # This week: 6 attempts, all deterred. Prev week: also 6.
+    for i in range(6):
+        _catch(s, "hawk.wav", now - 600 + i, float(i), clear=3.0)
+    for i in range(6):
+        _catch(s, "hawk.wav", now - 8 * 86400 + i, float(10 + i), clear=3.0)
+    rc = s.stats()["report_card"]
+    # 100 - min(40, 5*6) = 70; equal weeks -> neither rose nor fell; x 1.0 = 70.
+    # C band is [65, 80), thirds of 5: C+ at >=75, C- below 70, so 70 is mid-C.
+    assert rc["grade"] == "C"
+    assert rc["attempts"] == 6 and rc["attempts_prev"] == 6
+    assert rc["deterred_rate"] == pytest.approx(1.0)
+    assert "up from" not in rc["summary"] and "down from" not in rc["summary"]
+    assert rc["summary"] == "6 attempts, all deterred."
+
+
+def test_report_card_partial_outcomes_summary_counts_out_of_attempts(tmp_path):
+    now = 1893456000.0
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    # This week: 5 attempts, only 2 completed (1 deterred, 1 too slow),
+    # 3 still awaiting the outcome watcher. Prev week: 8.
+    _catch(s, "hawk.wav", now - 600, 0.0, clear=3.0)
+    _catch(s, "hawk.wav", now - 590, 1.0, clear=30.0)
+    for i in range(3):
+        _catch(s, "hawk.wav", now - 500 + i, float(2 + i), outcome=False)
+    for i in range(8):
+        _catch(s, "hawk.wav", now - 8 * 86400 + i, float(10 + i), clear=3.0)
+    rc = s.stats()["report_card"]
+    # 100 - min(40, 5*5) = 75; fell (5 < 8) -> +10 = 85; x 1/2 completed = 42.5 -> F.
+    assert rc["grade"] == "F"
+    assert rc["attempts"] == 5 and rc["attempts_prev"] == 8
+    # Rate divides by COMPLETED (2); the summary counts out of ATTEMPTS (5).
+    assert rc["deterred_rate"] == pytest.approx(0.5)
+    assert "1 of 5 deterred" in rc["summary"]
+    assert rc["summary"] == "5 attempts, 1 of 5 deterred, down from 8 last week."
+
+
 def test_backfills_wall_time_from_thumb_mtime(tmp_path):
     import os
     (tmp_path / "fire_5.jpg").write_bytes(b"\xff\xd8\xff")
