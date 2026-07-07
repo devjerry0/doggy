@@ -92,13 +92,13 @@ Browsers only allow the microphone and notifications on secure pages, so those f
 
 It creates a "watchdoggy home CA" on the Pi, issues the dashboard a certificate signed by it, and restarts the service. The CA never leaves your Pi and nothing talks to the internet.
 
-Then, once per device, download `https://<pi-host>:8000/ca.pem` (your browser warns about the connection this first time, which is expected) and trust it:
+Then just open the same address you always use, `http://<pi-host>:8000`, on each device. The page checks whether that device already trusts the home certificate. If it does, it sends you straight to the secure dashboard. If it does not, it hands you the certificate and the one-time steps to trust it (it detects your platform and offers the right file):
 
-- iPhone/iPad: open the file, install the profile, then Settings > General > About > Certificate Trust Settings > enable it
-- Mac: double-click the file in Keychain Access, set Trust to Always
+- iPhone/iPad: open the profile, install it in Settings, then Settings > General > About > Certificate Trust Settings > enable it
+- Mac: open the file in Keychain Access, set Trust to Always
 - Android: Settings > Security > Install a certificate > CA certificate
 
-After that the padlock is normal on every visit. The certificate lasts about two years; re-run the script to renew it, and your devices keep working without any new steps.
+The page rechecks on its own, so as soon as the device trusts the certificate it moves you along. After that the padlock is normal on every visit and your old bookmark keeps working. The certificate lasts about two years; re-run the script to renew it, and your devices keep working without any new steps. The secure dashboard also has a direct address, `https://<pi-host>:8443`, once a device is trusted.
 
 ## Configuration
 

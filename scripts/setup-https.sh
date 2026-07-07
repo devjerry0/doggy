@@ -35,19 +35,17 @@ openssl x509 -req -in certs/req.csr -CA certs/ca.pem -CAkey certs/ca-key.pem \
 rm -f certs/req.csr
 chmod 600 certs/key.pem
 
-grep -q '^DOGGY_SSL_CERT=' .env || cat >> .env <<EOF
+grep -qs '^DOGGY_SSL_CERT=' .env || cat >> .env <<EOF
 DOGGY_SSL_CERT=certs/cert.pem
 DOGGY_SSL_KEY=certs/key.pem
 DOGGY_CA_CERT=certs/ca.pem
 EOF
 sudo systemctl restart doggy
-echo "==> dashboard now at https://$HOST:8000"
-echo "    On each device, download https://$HOST:8000/ca.pem (one warning"
-echo "    this first time) and trust it:"
-echo "      iPhone/iPad: open the file, install the profile, then Settings >"
-echo "        General > About > Certificate Trust Settings > enable it"
-echo "      Mac: double-click it in Keychain Access, set Trust to Always"
-echo "      Android: Settings > Security > Install a certificate > CA"
-echo "    After that the padlock is normal everywhere. No renewals needed"
-echo "    until $(date -d '+825 days' '+%Y-%m' 2>/dev/null || echo '~2028'); re-run this script then."
+echo "==> done. On each device, open the same address you always use:"
+echo "      http://$HOST:8000"
+echo "    The page notices this is a new device and walks you through trusting"
+echo "    the home certificate once; after that it sends you straight to the"
+echo "    secure dashboard every time. (Direct address once trusted:"
+echo "      https://$HOST:8443 )"
+echo "    No renewals needed until $(date -d '+825 days' '+%Y-%m' 2>/dev/null || echo '~2028'); re-run this script then."
 REMOTE

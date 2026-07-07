@@ -289,6 +289,42 @@ def _serve_deps(s):
             EventStore(s.event_log_dir, 100, 0), FireGate(runtime))
 
 
+def test_dashboard_ping_is_204_with_cors(tmp_path):
+    s = Settings(event_log_dir=tmp_path)
+    c = TestClient(create_app(s, *_serve_deps(s)))
+    r = c.get("/ping")
+    assert r.status_code == 204
+    assert r.headers["access-control-allow-origin"] == "*"
+
+
+def test_serve_runs_door_and_dashboard_when_tls(monkeypatch, tmp_path):
+    import threading
+
+    runs = []
+    monkeypatch.setattr("uvicorn.run", lambda app, **kw: runs.append(kw))
+
+    class FakeThread:  # run the door synchronously so both uvicorn.run calls land
+        def __init__(self, target=None, daemon=None, **kw):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(threading, "Thread", FakeThread)
+    cert, key = tmp_path / "c.pem", tmp_path / "k.pem"
+    cert.write_text("x")
+    key.write_text("x")
+    s = Settings(event_log_dir=tmp_path, ssl_cert=cert, ssl_key=key)
+    serve(s, *_serve_deps(s))
+
+    assert len(runs) == 2
+    door, dashboard = runs  # door starts first (in the daemon thread), then the dashboard
+    assert door["port"] == s.web_port
+    assert "ssl_certfile" not in door and "ssl_keyfile" not in door
+    assert dashboard["port"] == s.ssl_port
+    assert dashboard["ssl_certfile"] == str(cert) and dashboard["ssl_keyfile"] == str(key)
+
+
 def test_serve_passes_ssl_when_configured(monkeypatch, tmp_path):
     calls = {}
     monkeypatch.setattr("uvicorn.run", lambda app, **kw: calls.update(kw))

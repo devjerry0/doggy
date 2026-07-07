@@ -125,8 +125,11 @@ class Settings(TunableSettings, BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     # Optional TLS: set both to serve https; needed for mic + notifications.
+    # With TLS on, the dashboard moves to ssl_port and web_port serves the
+    # onboarding door (see web/door.py).
     ssl_cert: Path | None = None
     ssl_key: Path | None = None
+    ssl_port: int = 8443
     ca_cert: Path | None = None  # served at /ca.pem so devices can trust the home CA
 
     def tunable(self) -> TunableSettings:
