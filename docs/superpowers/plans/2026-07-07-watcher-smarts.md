@@ -32,16 +32,18 @@
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `TunableSettings.target_labels: tuple[str, ...]` (default `("dog",)`); `detection.ANIMAL_TARGETS = ("dog", "cat", "bird")`; `FrameAnalysis.targets` (renamed from `dogs`); `Status.targets` (renamed from `dogs`); status JSON key `targets`.
+- Produces: `TunableSettings.target_labels: tuple[str, ...]` (detected classes, default `("dog",)`, non-empty) and `TunableSettings.alert_labels: tuple[str, ...]` (classes that may fire, default `("dog",)`, must be a subset of `target_labels`, MAY be empty = monitor mode); `detection.ANIMAL_TARGETS = ("dog", "cat", "bird")`; `FrameAnalysis.targets` (renamed from `dogs`; all detected animals, drawn) with `candidates` seeded only from alert-class detections; `Status.targets` (renamed from `dogs`; counts detected animals); status JSON key `targets`.
 
 - [ ] **Step 1: Write failing config tests** in `tests/core/test_config.py`:
 
 ```python
 def test_target_labels_default_and_parsing():
     assert TunableSettings().target_labels == ("dog",)
-    assert TunableSettings(target_labels="dog,cat").target_labels == ("dog", "cat")
-    assert TunableSettings(target_labels='["cat"]').target_labels == ("cat",)
-    assert TunableSettings(target_labels=["bird", "dog"]).target_labels == ("bird", "dog")
+    assert TunableSettings().alert_labels == ("dog",)
+    got = TunableSettings(target_labels="dog,cat", alert_labels="dog,cat")
+    assert got.target_labels == ("dog", "cat") and got.alert_labels == ("dog", "cat")
+    assert TunableSettings(target_labels='["cat"]', alert_labels='["cat"]').target_labels == ("cat",)
+    assert TunableSettings(target_labels=["bird", "dog"], alert_labels=["dog"]).alert_labels == ("dog",)
 
 
 def test_target_labels_rejects_unknown_and_empty():
@@ -49,6 +51,15 @@ def test_target_labels_rejects_unknown_and_empty():
         TunableSettings(target_labels="dragon")
     with pytest.raises(ValidationError):
         TunableSettings(target_labels=[])
+
+
+def test_alert_labels_subset_rule():
+    # detect-only birds: valid; alerting on an undetected class: not.
+    ok = TunableSettings(target_labels="dog,bird", alert_labels="dog")
+    assert ok.alert_labels == ("dog",)
+    assert TunableSettings(target_labels="dog", alert_labels=[]).alert_labels == ()
+    with pytest.raises(ValidationError):
+        TunableSettings(target_labels="dog", alert_labels="cat")
 ```
 
 - [ ] **Step 2: Run them** — `uv run pytest tests/core/test_config.py -q`. Expected: FAIL (no field).
@@ -65,18 +76,21 @@ PERSON_LABEL = "person"
 In `src/doggy/core/config.py` add to `TunableSettings` (after `confidence`):
 
 ```python
-    # Which animals fire the deterrent. Comma-separated in .env ("dog,cat").
+    # Which animals are detected (drawn + counted), comma-separated in .env
+    # ("dog,cat"), and which of those may fire the deterrent. alert_labels
+    # must be a subset of target_labels; empty alert_labels = monitor mode.
     target_labels: tuple[str, ...] = ("dog",)
+    alert_labels: tuple[str, ...] = ("dog",)
 ```
 
-and a validator (import `field_validator` from pydantic, `ANIMAL_TARGETS` from `doggy.vision.detection` would be a core->vision import cycle, so define the allowed set locally):
+and validators (import `field_validator` from pydantic; `ANIMAL_TARGETS` from `doggy.vision.detection` would be a core->vision import cycle, so define the allowed set locally):
 
 ```python
     _ALLOWED_TARGETS = ("dog", "cat", "bird")
 
-    @field_validator("target_labels", mode="before")
+    @field_validator("target_labels", "alert_labels", mode="before")
     @classmethod
-    def _parse_target_labels(cls, v):
+    def _parse_labels(cls, v):
         if isinstance(v, str):
             s = v.strip()
             if s.startswith("["):
@@ -84,12 +98,20 @@ and a validator (import `field_validator` from pydantic, `ANIMAL_TARGETS` from `
             else:
                 v = [part.strip() for part in s.split(",") if part.strip()]
         labels = tuple(dict.fromkeys(v))  # de-dupe, keep order
-        if not labels:
-            raise ValueError("select at least one animal to watch for")
         unknown = [x for x in labels if x not in cls._ALLOWED_TARGETS]
         if unknown:
             raise ValueError(f"unknown watch classes: {unknown}")
         return labels
+```
+
+plus, inside the existing `_check_ranges` model validator, the cross-field rules:
+
+```python
+        if not self.target_labels:
+            raise ValueError("select at least one animal to watch for")
+        extra = [x for x in self.alert_labels if x not in self.target_labels]
+        if extra:
+            raise ValueError(f"alert classes must also be detected: {extra}")
 ```
 
 (`import json` at top. Make `detection.ANIMAL_TARGETS` reference the same values; a comment in each file pointing at the other is enough — a shared import would create a cycle.)
@@ -116,12 +138,15 @@ and in `DetectionAnalyzer.analyze`:
 
 ```python
         detections = self._detector.detect(frame)
-        wanted = set(cfg.target_labels)
-        targets = [d for d in detections if d.label in wanted]
+        detected = set(cfg.target_labels)
+        alertable = set(cfg.alert_labels)
+        targets = [d for d in detections if d.label in detected]
         people = [d for d in detections if d.label == PERSON_LABEL]
         analysis = FrameAnalysis(
             shape=frame.shape, people=people, targets=targets,
-            candidates=list(targets))
+            # Only alert-class animals may trigger; detect-only ones are
+            # drawn (in the ignored grey) but never enter the candidate set.
+            candidates=[d for d in targets if d.label in alertable])
 ```
 
 (import `PERSON_LABEL` only; drop `TARGET_LABEL`.)
@@ -147,23 +172,37 @@ In `src/doggy/vision/detector.py` replace the module-level `_RETURNED_LABELS` an
         return out
 ```
 
-In `src/doggy/vision/filters/person.py`: rename `suppress_dogs_overlapping_people` -> `suppress_targets_overlapping_people` (parameter `dogs` -> `targets`; docstring: "A person misclassified as a target..."), and in `PersonSuppressionFilter.apply` narrow `analysis.targets` and reseed `analysis.candidates` from it.
+In `src/doggy/vision/filters/person.py`: rename `suppress_dogs_overlapping_people` -> `suppress_targets_overlapping_people` (parameter `dogs` -> `targets`; docstring: "A person misclassified as a target..."), and in `PersonSuppressionFilter.apply` narrow `analysis.targets` then reseed candidates WITHOUT resurrecting detect-only animals:
+
+```python
+        analysis.targets = suppress_targets_overlapping_people(
+            analysis.targets, analysis.people, cfg.person_iou_threshold)
+        alertable = set(cfg.alert_labels)
+        analysis.candidates = [d for d in analysis.targets if d.label in alertable]
+```
 
 In `src/doggy/core/status.py`: `dogs: int = 0` -> `targets: int = 0` (comment: "watched animals in frame").
 
 In `src/doggy/pipeline.py` `run_once`: `analysis.dogs` -> `analysis.targets` in the annotate call, and `dogs=len(analysis.candidates)` -> `targets=len(analysis.candidates)` in the status update. Comment on the annotate line: `targets` are drawn.
 
 - [ ] **Step 5: Dashboard.** In `src/doggy/web/static/index.html`:
-  - Settings card, directly under the "Ignore people" toggle, add:
+  - Settings card, directly under the "Ignore people" toggle, add a two-column detect/alert grid:
 
 ```html
         <div class="field">
           <div class="row"><label>Watch for</label></div>
-          <div class="desc">Which animals set off the deterrent. People never do.</div>
-          <div class="btnrow" id="target_labels" style="margin-top:.5rem">
-            <label class="chk"><input type="checkbox" value="dog" /> Dogs</label>
-            <label class="chk"><input type="checkbox" value="cat" /> Cats</label>
-            <label class="chk"><input type="checkbox" value="bird" /> Birds</label>
+          <div class="desc">Detect means it shows on the live view. Alert means the deterrent fires. People never set it off.</div>
+          <div class="watchgrid" id="watch_grid">
+            <span></span><span class="wg-h">Detect</span><span class="wg-h">Alert</span>
+            <span class="wg-name">Dogs</span>
+            <input type="checkbox" data-kind="detect" value="dog" />
+            <input type="checkbox" data-kind="alert" value="dog" />
+            <span class="wg-name">Cats</span>
+            <input type="checkbox" data-kind="detect" value="cat" />
+            <input type="checkbox" data-kind="alert" value="cat" />
+            <span class="wg-name">Birds</span>
+            <input type="checkbox" data-kind="detect" value="bird" />
+            <input type="checkbox" data-kind="alert" value="bird" />
           </div>
         </div>
 ```
@@ -171,13 +210,21 @@ In `src/doggy/pipeline.py` `run_once`: `analysis.dogs` -> `analysis.targets` in 
   with CSS next to `.toggle` styles:
 
 ```css
-  .chk{display:inline-flex;align-items:center;gap:.45rem;font-size:.92rem;
-       font-weight:550;padding:.5rem .8rem;border:1px solid var(--seam);
-       border-radius:8px;cursor:pointer}
-  .chk input{accent-color:var(--lamp);width:16px;height:16px;margin:0}
+  .watchgrid{display:grid;grid-template-columns:1fr auto auto;gap:.55rem 1.4rem;
+             align-items:center;margin-top:.6rem}
+  .watchgrid .wg-h{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;
+             text-transform:uppercase;color:var(--stone);justify-self:center}
+  .watchgrid .wg-name{font-size:.92rem;font-weight:550}
+  .watchgrid input{accent-color:var(--lamp);width:17px;height:17px;margin:0;
+             justify-self:center;cursor:pointer}
+  .watchgrid input:disabled{opacity:.3;cursor:default}
 ```
 
-  - JS: on change of any checkbox, collect checked values; if none, revert the click (`e.target.checked = true`) and skip the patch; else `patch({target_labels: values})`. In `poll()`, when none of the checkboxes has focus, sync them from `s.settings.target_labels`. Replace `s.dogs` with `s.targets` for the `dogs` readout element, and make the labels dynamic:
+  - JS rules for the grid, applied on any checkbox change, then one `patch({target_labels: detected, alert_labels: alerted})`:
+    - Alert checkbox is `disabled` while its row's Detect is unchecked; unchecking Detect also unchecks Alert.
+    - At least one Detect must stay checked: if a change would empty the detect set, revert it (`e.target.checked = true`) and skip the patch.
+    - Empty Alert set is allowed (monitor mode: it watches, never reacts).
+    In `poll()`, when no grid checkbox has focus, sync all six from `s.settings.target_labels` / `s.settings.alert_labels` (and the disabled states). Replace `s.dogs` with `s.targets` for the `dogs` readout element, and make the labels dynamic:
 
 ```js
 function targetNoun(labels, plural){
@@ -189,7 +236,7 @@ function targetNoun(labels, plural){
 }
 ```
 
-  Each `poll()`: set the readout label to `targetNoun(labels, true) + " in view"`, the certainty labels ("Certainty it's a dog" stat label and the "How sure it must be it's a dog" slider label) to use the singular noun, and the CONFIRMING state word to `"Dog spotted"` for a single class (capitalized noun + " spotted") or `"Intruder spotted"` for several. Give the three labels ids (`lbl_inview`, `lbl_certainty`, `lbl_confidence`) so JS can set textContent; keep the current English as the static HTML default.
+  Each `poll()`: the "in view" readout label uses the DETECTED classes (`targetNoun(s.settings.target_labels, true) + " in view"`); the certainty labels ("Certainty it's a dog" stat label, "How sure it must be it's a dog" slider label) and the CONFIRMING state word use the ALERT classes — they describe what fires. Single alert class -> capitalized noun + " spotted"; several -> "Intruder spotted"; empty alert set -> fall back to the detected classes for the certainty labels (the wording still reads naturally and nothing can fire). Give the three labels ids (`lbl_inview`, `lbl_certainty`, `lbl_confidence`) so JS can set textContent; keep the current English as the static HTML default.
 
 - [ ] **Step 6: Update every remaining reference.** `grep -rn "TARGET_LABEL\|suppress_dogs\|\.dogs\b\|dogs=" src tests` and fix all hits (tests construct `FrameAnalysis(..., dogs=...)` and assert `status.dogs`; stub detections keep the literal `"dog"` label). Add one new analyzer test:
 
@@ -198,9 +245,19 @@ def test_analyzer_honors_target_labels():
     cat = Detection("cat", 0.9, (0, 0, 10, 10))
     dog = Detection("dog", 0.9, (20, 20, 30, 30))
     analyzer = DetectionAnalyzer(StubDetector([[cat, dog]]), FilterChain([]))
-    cfg = TunableSettings(target_labels=["cat"])
+    cfg = TunableSettings(target_labels=["cat"], alert_labels=["cat"])
     analysis = analyzer.analyze(np.zeros((100, 100, 3), np.uint8), cfg)
     assert analysis.targets == [cat]
+
+
+def test_detect_only_class_never_becomes_candidate():
+    bird = Detection("bird", 0.9, (0, 0, 10, 10))
+    dog = Detection("dog", 0.9, (20, 20, 30, 30))
+    analyzer = DetectionAnalyzer(StubDetector([[bird, dog]]), FilterChain([]))
+    cfg = TunableSettings(target_labels=["dog", "bird"], alert_labels=["dog"])
+    analysis = analyzer.analyze(np.zeros((100, 100, 3), np.uint8), cfg)
+    assert analysis.targets == [bird, dog]   # both drawn
+    assert analysis.candidates == [dog]      # only the dog can fire
 ```
 
 - [ ] **Step 7: Full gates.** `uv run pytest -m "not slow" -q` green; `uv run ruff check src tests` clean.

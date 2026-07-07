@@ -11,22 +11,39 @@ Decisions already made with the user:
   per device) to unlock microphone access for push-to-talk and the
   Notification API.
 
-## 1. Watch-for classes (dog / cat / bird)
+## 1. Watch-for classes (dog / cat / bird), detect and alert separately
 
 The deployed YOLO26n model detects 80 COCO classes. The watcher becomes
-class-configurable over a curated animal menu: **dog, cat, bird**.
+class-configurable over a curated animal menu: **dog, cat, bird** — with
+two independent checkmarks per animal:
 
-- Config: `DOGGY_TARGET_LABELS` (comma-separated, default `dog`), tunable
-  from the dashboard as checkboxes. At least one required.
+- **Detect**: the animal is detected, drawn on the live view, and counted
+  in the "in view" readout. Never fires anything by itself.
+- **Alert**: the animal can trigger the deterrent (and everything downstream:
+  events, outcomes, escalation). Alert requires Detect: the UI disables the
+  Alert checkmark until Detect is on, and unchecking Detect clears Alert.
+
+So "watch birds but never chirp at them" is: birds Detect on, Alert off.
+Zero Alert classes is valid (pure monitor mode: it watches and shows, never
+reacts).
+
+- Config: `DOGGY_TARGET_LABELS` (detected classes, comma-separated, default
+  `dog`, at least one required) and `DOGGY_ALERT_LABELS` (default `dog`),
+  validated as a subset of `target_labels`; may be empty. Both tunable from
+  the dashboard.
 - `vision`: the detector keeps detections whose label is `person`, any
-  selected target, or an inventory class (section 2b). `FrameAnalysis.dogs` renames to `FrameAnalysis.targets`;
-  person suppression applies to any target box coinciding with a person box
-  (same IoU rule, unchanged threshold).
+  detected class, or an inventory class (section 2b). `FrameAnalysis.dogs`
+  renames to `FrameAnalysis.targets` (all detected animals, drawn);
+  `candidates` seeds from the subset whose label is in `alert_labels`, so
+  detect-only animals are drawn in the existing "ignored" grey and can
+  never trigger. Person suppression applies to any target box coinciding
+  with a person box (same IoU rule, unchanged threshold).
 - Status JSON: `dogs` key renames to `targets` (dashboard is the only
   consumer; updated in the same change).
-- Dashboard copy goes dynamic: "Dogs in view" becomes a label derived from
-  the selection ("Dogs in view", "Cats in view", "Dogs and cats in view");
-  same for "Certainty it's a dog". Existing plain-language style is kept.
+- Dashboard copy goes dynamic: "Dogs in view" derives from the detected
+  classes ("Dogs in view", "Cats in view", "Animals in view"); "Certainty
+  it's a dog" and the "Dog spotted" state word derive from the alert
+  classes (they describe what fires). Existing plain-language style kept.
 - Trigger, zone, cooldowns, hourly cap: unchanged (they operate on
   confirmed targets regardless of class).
 - Existing `.env` files without the new var behave exactly as today.
