@@ -50,6 +50,28 @@ def test_clear_time_measured_after_debounce(tmp_path):
     assert rec.outcome_at == 2000.0
 
 
+def test_reoccupancy_flicker_restarts_clear_debounce(tmp_path):
+    # A brief re-appearance during the clear debounce must restart the count:
+    # clear time is measured from the LAST departure, not the first.
+    store = EventStore(tmp_path, 100, 0)
+    r = store.add(_img(), 0.9, 1.0, 1000.0, 10.0)
+    w = OutcomeWatcher(store, _gate(), FakeAlerter(), _runtime(), clock=lambda: 2000.0)
+    dog = Detection("dog", 0.9, (0, 0, 10, 10))
+    w.on_dog_caught(DogCaught(r, _img(), 10.0))
+    w.on_frame(_analysis([dog]), 11.0, _cfg())       # still there
+    w.on_frame(_analysis([]), 14.0, _cfg())          # gone at 14.0
+    w.on_frame(_analysis([dog]), 15.0, _cfg())       # back: debounce must reset
+    w.on_frame(_analysis([]), 15.5, _cfg())          # gone again at 15.5
+    w.on_frame(_analysis([]), 17.0, _cfg())          # 1.5s since 15.5: not yet
+    rec = store.list()[0]
+    assert rec.clear_seconds is None                 # no early finalize off 14.0
+    assert rec.outcome_at is None
+    w.on_frame(_analysis([]), 17.6, _cfg())          # 2.1s since 15.5: finalize
+    rec = store.list()[0]
+    assert rec.clear_seconds == pytest.approx(5.5)   # 15.5 - 10.0, not 14.0 - 10.0
+    assert rec.outcome_at == 2000.0
+
+
 def test_timeout_records_not_deterred(tmp_path):
     store = EventStore(tmp_path, 100, 0)
     r = store.add(_img(), 0.9, 1.0, 1000.0, 10.0)

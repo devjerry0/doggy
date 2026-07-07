@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+import pytest
 
 from doggy.reaction.sound import FakeAlerter, SoundReaction
 from doggy.vision.camera import FakeCamera
@@ -366,6 +367,51 @@ def test_pipeline_attaches_outcome_after_dog_leaves(tmp_path):
     assert fired[1] is True                    # fired on the 2nd sighting (mono 1.0)
     rec = store.list()[0]
     assert rec.clear_seconds is not None       # gone at 2.0; debounce met at 4.0
+    assert rec.outcome_at is not None
+
+
+def test_pipeline_fire_frame_inventory_not_in_before_snapshot(tmp_path):
+    # Theft attribution: the "before" inventory is snapshotted when the fire
+    # publishes DogCaught, and run_once feeds the fire frame to the watcher
+    # only AFTER the fire block -- so a sighting on the fire frame itself must
+    # not promote an item into "before". The banana (seen on the two frames
+    # before any dog) is genuinely before and counts as taken; the sandwich
+    # reaches the tracker's 2-of-5 bar only WITH the fire frame, so it must
+    # stay out of "before" and out of `taken`.
+    settings = Settings(confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5)
+    runtime = RuntimeSettings(settings.tunable())
+    dog = Detection("dog", 0.9, (0, 0, 10, 10))
+    banana = Detection("banana", 0.8, (20, 20, 30, 30))
+    sandwich = Detection("sandwich", 0.8, (30, 30, 40, 40))
+    script = [
+        [banana],              # t=0.0  banana's 1st sighting
+        [banana, sandwich],    # t=1.0  banana at 2-of-5; sandwich's 1st sighting
+        [dog],                 # t=2.0  first dog sighting: arms, never fires
+        [dog, sandwich],       # t=3.0  FIRE; sandwich's 2nd sighting rides the fire frame
+        [],                    # t=4.0  everything gone; clear debounce starts
+        [],                    # t=4.5  0.5s clear: not yet
+        [],                    # t=6.1  2.1s clear: finalize; both foods aged out
+    ]
+    store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
+    outcome = _outcome(store, runtime)
+    clock = iter([0.0, 1.0, 2.0, 3.0, 4.0, 4.5, 6.1])
+    pipe = Pipeline(
+        settings=settings, analyzer=_analyzer(StubDetector(script)),
+        camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
+        runtime=runtime, status=StatusStore(),
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips, store, outcome),
+        clip_service=clips, outcome=outcome,
+        clock=lambda: next(clock), rng=random.Random(0),
+    )
+    frame = np.zeros((100, 100, 3), np.uint8)
+    fired = [pipe.run_once(frame) for _ in range(7)]
+    assert fired[3] is True                          # fired on the 2nd dog sighting (mono 3.0)
+    rec = store.list()[0]
+    assert rec.taken == ["banana"]                   # sandwich only sighted pre-fire once
+    assert rec.clear_seconds == pytest.approx(1.0)   # gone at 4.0, fire at 3.0
     assert rec.outcome_at is not None
 
 
