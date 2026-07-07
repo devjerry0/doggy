@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 
 from doggy.clips import ClipBuffer, encode_clip
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 
 
 def _img():

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from doggy.alerter import FakeAlerter
 from doggy.core.config import Settings
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import FrameBuffer, StatusStore

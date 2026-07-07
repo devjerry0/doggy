@@ -4,7 +4,7 @@ from collections import deque
 
 import numpy as np
 
-from doggy.events import EventRecord, EventStore
+from doggy.events.store import EventRecord, EventStore
 from doggy.core.runtime import RuntimeSettings
 
 _HOUR = 3600.0

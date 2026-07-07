@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from doggy.alerter import Alerter
 from doggy.core.config import Settings, TunableSettings
-from doggy.events import EventRecord, EventStore
+from doggy.events.store import EventRecord, EventStore
 from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import FrameBuffer, StatusStore

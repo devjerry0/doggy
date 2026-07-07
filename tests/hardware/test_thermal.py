@@ -1,5 +1,5 @@
 from doggy.core.config import TunableSettings
-from doggy.thermal import ThermalGovernor
+from doggy.hardware.thermal import ThermalGovernor
 
 CFG = TunableSettings(detect_interval_seconds=0.5, thermal_enabled=True,
                       thermal_target_c=74.0, thermal_max_c=82.0,
@@ -38,7 +38,7 @@ def test_interval_never_faster_than_normal():
 
 def test_governor_picks_cooldown_when_hot(tmp_path):
     from doggy.core.config import TunableSettings
-    from doggy.thermal import ThermalGovernor
+    from doggy.hardware.thermal import ThermalGovernor
     f = tmp_path / "temp"; f.write_text("83000\n")
     g = ThermalGovernor(str(f))
     cfg = TunableSettings(detect_interval_seconds=0.5, thermal_cooldown_interval_seconds=1.5)

@@ -8,7 +8,7 @@ from doggy.alerter import build_alerter
 from doggy.camera import build_camera
 from doggy.core.config import load_settings
 from doggy.detector import build_detector
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 from doggy.pipeline import Pipeline
 from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings

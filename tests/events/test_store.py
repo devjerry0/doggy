@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 
 
 def _img():

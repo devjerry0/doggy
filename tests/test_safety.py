@@ -1,7 +1,7 @@
 import numpy as np
 
 from doggy.core.config import TunableSettings
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings
 
@@ -60,7 +60,7 @@ def test_snooze_blocks_then_expires(tmp_path):
 
 
 def test_record_fire_delegates_to_store(tmp_path):
-    from doggy.events import EventStore
+    from doggy.events.store import EventStore
     from doggy.core.config import Settings
     from doggy.core.runtime import RuntimeSettings
     import numpy as np

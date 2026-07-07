@@ -1,4 +1,4 @@
-from doggy.power import PowerMonitor
+from doggy.hardware.power import PowerMonitor
 
 
 class FakeClock:

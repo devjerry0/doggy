@@ -7,7 +7,7 @@ from doggy.camera import FakeCamera
 from doggy.core.config import Settings
 from doggy.detection import Detection
 from doggy.detector import StubDetector
-from doggy.events import EventStore
+from doggy.events.store import EventStore
 from doggy.pipeline import Pipeline
 from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings
