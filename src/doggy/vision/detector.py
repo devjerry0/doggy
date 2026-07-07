@@ -6,13 +6,22 @@ from typing import Protocol
 
 import numpy as np
 
-from doggy.core.config import Settings
+from doggy.core.config import Settings, TunableSettings
 from doggy.vision.detection import Detection, INVENTORY_LABELS, PERSON_LABEL
 from doggy.core.runtime import RuntimeSettings
 
 
 class Detector(Protocol):
     def detect(self, frame: np.ndarray) -> list[Detection]: ...
+
+
+def keep_detection(label: str, score: float, cfg: TunableSettings) -> bool:
+    """Per-class threshold re-check after the model's low-water predict pass."""
+    wanted = set(cfg.target_labels) | {PERSON_LABEL}
+    if label in wanted:
+        return score >= cfg.confidence
+    return (cfg.inventory_enabled and label in INVENTORY_LABELS
+            and score >= cfg.inventory_confidence)
 
 
 class StubDetector:
@@ -54,7 +63,6 @@ class YoloDetector:
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         cfg = self._runtime.get()
-        wanted = set(cfg.target_labels) | {PERSON_LABEL}
         # Inventory rides the same inference pass at its own (laxer) threshold;
         # predict at the lower bar, then re-apply each class's own bar below.
         conf = (min(cfg.confidence, cfg.inventory_confidence)
@@ -68,10 +76,7 @@ class YoloDetector:
             for box in r.boxes:
                 label = names[int(box.cls[0])]
                 score = float(box.conf[0])
-                keep = (label in wanted and score >= cfg.confidence) or (
-                    cfg.inventory_enabled and label in INVENTORY_LABELS
-                    and score >= cfg.inventory_confidence)
-                if not keep:
+                if not keep_detection(label, score, cfg):
                     continue
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0].tolist())
                 out.append(Detection(label, score, (x1, y1, x2, y2)))

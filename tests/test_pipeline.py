@@ -295,20 +295,24 @@ def test_pipeline_finalizes_clip_after_postroll(tmp_path):
 
 def test_pipeline_reports_counter_inventory(tmp_path):
     # A cup seen twice becomes "on the counter" (2-of-5 debounce); it is
-    # inventory only, so it must never count as a target or fire.
-    settings = Settings()
+    # inventory only, so it must never count as a target or fire. The timing
+    # config would fire on the 2nd frame if the cup were a candidate (same
+    # firing-capable setup as the monitor-mode test above).
+    settings = Settings(confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5)
     runtime = RuntimeSettings(settings.tunable())
     cup = [Detection("cup", 0.5, (10, 10, 20, 20))]
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
     clips = _clips(store, settings, runtime)
+    clock = iter([0.0, 1.0])
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([cup, cup])),
         camera=FakeCamera([np.zeros((40, 40, 3), np.uint8)], loop=True),
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        clip_service=clips, clock=lambda: 0.0,
+        clip_service=clips, clock=lambda: next(clock),
         rng=random.Random(0),
     )
     frame = np.zeros((40, 40, 3), np.uint8)
@@ -316,6 +320,7 @@ def test_pipeline_reports_counter_inventory(tmp_path):
     assert not any(fired)
     assert status.snapshot().on_counter == [{"label": "cup", "count": 1}]
     assert status.snapshot().targets == 0
+    assert status.snapshot().confidence == 0.0    # candidates stayed empty
 
 
 def test_annotate_draws_zone_polygon():

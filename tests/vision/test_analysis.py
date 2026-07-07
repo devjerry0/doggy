@@ -66,6 +66,7 @@ def test_analyzer_collects_inventory_separately():
     analysis = analyzer.analyze(np.zeros((100, 100, 3), np.uint8), TunableSettings())
     assert analysis.inventory == [snack]
     assert analysis.targets == [dog]
+    assert analysis.candidates == [dog]           # inventory never becomes a candidate
 
 
 def test_inventory_tracker_debounces_two_of_five():
@@ -75,6 +76,14 @@ def test_inventory_tracker_debounces_two_of_five():
     for _ in range(4):
         t.update([])                              # gone 4 frames
     assert t.update([]) == []
+
+
+def test_inventory_tracker_labels_applies_debounce_without_consuming():
+    t = InventoryTracker()
+    t.update(["cup"])
+    t.update(["cup", "banana"])                   # cup: 2 of 5; banana: 1 of 5
+    assert t.labels() == {"cup"}
+    assert t.labels() == {"cup"}                  # pure read: window unchanged
 
 
 def test_chain_runs_filters_in_order():
