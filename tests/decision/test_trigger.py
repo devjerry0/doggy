@@ -3,7 +3,7 @@ import random
 from doggy.core.config import TunableSettings
 from doggy.vision.detection import Detection
 from doggy.core.runtime import RuntimeSettings
-from doggy.trigger import TriggerLogic, TriggerState
+from doggy.decision.trigger import TriggerLogic, TriggerState
 
 DOG = [Detection(label="dog", confidence=0.9, box=(0, 0, 10, 10))]
 NONE: list[Detection] = []
@@ -121,3 +121,14 @@ def test_fire_latency_is_time_since_first_sighting():
     t.update(d, now=0.5)
     assert t.update(d, now=1.0) is True
     assert t.fire_latency == 1.0
+
+
+def test_state_objects_round_trip():
+    t = make()  # window_m=2, n=3, confirm=1.0, cooldown 10
+    assert t.state is TriggerState.IDLE
+    t.update(DOG, now=0.0)
+    assert t.state is TriggerState.CONFIRMING
+    t.update(DOG, now=1.0)
+    assert t.state is TriggerState.COOLDOWN
+    t.update(NONE, now=20.0)
+    assert t.state is TriggerState.IDLE  # expired, no dog

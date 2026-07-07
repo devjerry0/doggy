@@ -21,7 +21,7 @@ from doggy.safety import SafetyGovernor
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import CONFIDENCE_DECIMALS, FrameBuffer, StatusStore
 from doggy.hardware.thermal import ThermalGovernor
-from doggy.trigger import TriggerLogic
+from doggy.decision.trigger import TriggerLogic
 from doggy.vision.annotate import annotate
 
 log = logging.getLogger("doggy")
