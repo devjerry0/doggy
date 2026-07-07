@@ -88,6 +88,23 @@ DOGGY_LOG_LEVEL=INFO
 ENV
 fi
 
+echo "==> pointing the clock at the LAN router (real timestamps, stays offline)"
+# The Pi has no battery clock and the egress firewall blocks public NTP, so sync
+# time from the gateway over the LAN. If the router doesn't serve NTP, the
+# dashboard falls back to relative ("2h ago") times. No firewall change.
+GW=$(ip route 2>/dev/null | awk '/default/{print $3; exit}')
+if [ -n "$GW" ]; then
+  sudo tee /etc/systemd/timesyncd.conf >/dev/null <<TIMESYNC
+[Time]
+NTP=$GW
+FallbackNTP=
+TIMESYNC
+  sudo systemctl restart systemd-timesyncd 2>/dev/null || true
+  echo "    NTP=$GW (needs the router to serve time; else the UI shows relative time)"
+else
+  echo "    no default gateway found; skipping clock sync (UI shows relative time)"
+fi
+
 echo "==> installing systemd service"
 sudo tee /etc/systemd/system/doggy.service >/dev/null <<UNIT
 [Unit]
