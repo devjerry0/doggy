@@ -21,7 +21,7 @@ src/doggy/
   vision/              see: a frame -> detections -> a narrowed candidate set
     detection.py       Detection dataclass + TARGET_LABEL ("dog") / PERSON_LABEL
     camera.py          Camera protocol + OpenCV/file backends + registry factory
-    detector.py        Detector protocol + YOLO/stub backends + registry factory
+    detector.py        Detector protocol + YOLO/stub backends + plain factory
     analysis.py        FrameAnalysis + DetectionAnalyzer (runs the detector, then the chain)
     annotate.py        draws boxes and the watch-area onto a frame for the dashboard
     filters/           Chain of Responsibility links over FrameAnalysis

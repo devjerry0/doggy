@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 import shutil
 import subprocess
@@ -10,6 +11,8 @@ from typing import Protocol
 
 from doggy.core.config import Settings, TunableSettings
 from doggy.core.runtime import RuntimeSettings
+
+log = logging.getLogger("doggy")
 
 _CLIP_EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 
@@ -127,10 +130,10 @@ class CommandAlerter(BaseAlerter):
 
 
 class LogAlerter(BaseAlerter):
-    """No-op backend: resolves a clip but plays nothing (headless/dev use)."""
+    """Null Object backend: logs what would play instead of playing (headless/dev)."""
 
     def _play(self, clip: Path, volume: float) -> None:
-        pass
+        log.info("alert (log backend): would play %s at volume %.2f", clip, volume)
 
 
 _BACKENDS = {
