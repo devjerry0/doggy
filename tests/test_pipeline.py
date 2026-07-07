@@ -21,6 +21,7 @@ def test_pipeline_fires_after_confirmation(tmp_path):
     detector = StubDetector([dog, dog, dog, dog])
     alerter = FakeAlerter()
     clock = iter([0.0, 0.5, 1.0, 1.5])
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         settings=settings,
         detector=detector,
@@ -30,7 +31,7 @@ def test_pipeline_fires_after_confirmation(tmp_path):
         status=StatusStore(),
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)),
+        safety=SafetyGovernor(runtime, store), event_store=store,
         clock=lambda: next(clock),
         rng=random.Random(0),
     )
@@ -49,6 +50,7 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
         Detection("dog", 0.8, (20, 20, 30, 30)),
     ]
     status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         settings=settings,
         detector=StubDetector([two_dogs]),
@@ -58,7 +60,7 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
         status=status,
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)),
+        safety=SafetyGovernor(runtime, store), event_store=store,
         clock=lambda: 0.0,
         rng=random.Random(0),
     )
@@ -79,12 +81,13 @@ def test_pipeline_ignores_dogs_outside_zone(tmp_path):
     runtime = RuntimeSettings(settings.tunable())
     outside = [Detection("dog", 0.9, (80, 80, 95, 95))]
     status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         settings=settings, detector=StubDetector([outside]),
         camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
         alerter=FakeAlerter(), runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)), clock=lambda: 0.0,
+        safety=SafetyGovernor(runtime, store), event_store=store, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     fired = pipe.run_once(np.zeros((100, 100, 3), np.uint8))
@@ -99,6 +102,7 @@ def test_pipeline_fires_for_dog_inside_zone(tmp_path):
     runtime = RuntimeSettings(settings.tunable())
     inside = [Detection("dog", 0.9, (5, 5, 20, 20))]
     alerter = FakeAlerter()
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         # TriggerLogic (pre-existing, out of scope here) never fires on the very
         # first sighting -- the IDLE->CONFIRMING transition always returns False
@@ -108,7 +112,7 @@ def test_pipeline_fires_for_dog_inside_zone(tmp_path):
         camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
         alerter=alerter, runtime=runtime, status=StatusStore(),
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)), clock=lambda: 0.0,
+        safety=SafetyGovernor(runtime, store), event_store=store, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     assert pipe.run_once(np.zeros((100, 100, 3), np.uint8)) is False
@@ -132,7 +136,7 @@ def test_pipeline_records_trigger_confidence_not_empty_fire_frame(tmp_path):
         camera=FakeCamera([np.zeros((16, 16, 3), np.uint8)], loop=True),
         alerter=FakeAlerter(), runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, store),
+        safety=SafetyGovernor(runtime, store), event_store=store,
         clock=lambda: next(clock), rng=random.Random(0),
     )
     frame = np.zeros((16, 16, 3), np.uint8)
@@ -151,12 +155,13 @@ def test_pipeline_suppresses_person_misclassified_as_dog(tmp_path):
     both = [Detection("dog", 0.9, (0, 0, 100, 180)),
             Detection("person", 0.9, (2, 2, 98, 178))]
     status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         settings=settings, detector=StubDetector([both, both]),
         camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
         alerter=FakeAlerter(), runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)), clock=lambda: 0.0,
+        safety=SafetyGovernor(runtime, store), event_store=store, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)
@@ -177,12 +182,13 @@ def test_pipeline_real_dog_near_person_still_fires(tmp_path):
             Detection("person", 0.9, (0, 0, 100, 200))]
     alerter = FakeAlerter()
     status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
     pipe = Pipeline(
         settings=settings, detector=StubDetector([both, both]),
         camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
         alerter=alerter, runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        safety=SafetyGovernor(runtime, EventStore(tmp_path, 10, 0)), clock=lambda: 0.0,
+        safety=SafetyGovernor(runtime, store), event_store=store, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)

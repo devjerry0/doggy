@@ -11,9 +11,11 @@ import numpy as np
 
 from doggy.alerter import Alerter
 from doggy.camera import Camera
+from doggy.clips import ClipBuffer, encode_clip
 from doggy.config import Settings
 from doggy.detection import PERSON_LABEL, TARGET_LABEL
 from doggy.detector import Detector
+from doggy.events import EventStore
 from doggy.pacer import Pacer
 from doggy.people import suppress_dogs_overlapping_people
 from doggy.power import PowerMonitor
@@ -71,7 +73,8 @@ class Pipeline:
     def __init__(self, *, settings: Settings, detector: Detector, camera: Camera,
                  alerter: Alerter, runtime: RuntimeSettings, status: StatusStore,
                  raw_buffer: FrameBuffer, annotated_buffer: FrameBuffer,
-                 safety: SafetyGovernor, clock: Callable[[], float] = time.monotonic,
+                 safety: SafetyGovernor, event_store: EventStore,
+                 clock: Callable[[], float] = time.monotonic,
                  rng: random.Random | None = None) -> None:
         self.settings = settings
         self.detector = detector
@@ -82,12 +85,17 @@ class Pipeline:
         self.raw_buffer = raw_buffer
         self.annotated_buffer = annotated_buffer
         self.safety = safety
+        self.event_store = event_store
         self.clock = clock
         self.trigger = TriggerLogic(runtime, rng=rng or random.Random())
         self.zone = ZoneFilter()
         self.pacer = Pacer(clock=clock)
         self.governor = ThermalGovernor()
         self.power = PowerMonitor(clock=clock)
+        # Rolling in-memory JPEG buffer for opt-in per-catch clips (no SD writes
+        # until a fire asks for a slice). Pending clips finalize after post-roll.
+        self._clip_buffer = ClipBuffer(settings.clip_window_seconds)
+        self._pending_clips: list[dict] = []
 
     def run_once(self, frame: np.ndarray) -> bool:
         """Process a single frame: detect, annotate, trigger, maybe fire."""
@@ -104,7 +112,13 @@ class Pipeline:
         show_people = people if cfg.person_suppression_enabled else None
         points = cfg.zone_points if cfg.zone_enabled else []
         in_zone = self.zone.filter(dogs, points, frame.shape)
-        self.annotated_buffer.set(annotate(frame, dogs, in_zone, points, people=show_people))
+        annotated = annotate(frame, dogs, in_zone, points, people=show_people)
+        self.annotated_buffer.set(annotated)
+        if cfg.clips_enabled:
+            # Buffer the ANNOTATED frame so any resulting clip shows the boxes.
+            ok, buf = cv2.imencode(".jpg", annotated)
+            if ok:
+                self._clip_buffer.push(now, buf.tobytes())
         top = max((d.confidence for d in in_zone), default=0.0)
         fired = self.trigger.update(in_zone, now)
         muted = not self.safety.allow_fire(now)
@@ -120,11 +134,35 @@ class Pipeline:
                 time.time(), now,
             )
             self.status.update(last_fire_ts=record.ts, last_fire_thumb=record.thumb)
+            if cfg.clips_enabled:
+                # Defer encoding until post-roll has elapsed so the clip captures
+                # a few seconds after the catch as well as the pre-roll.
+                self._pending_clips.append(
+                    {"id": record.id, "fire_ts": now, "end": now + cfg.clip_postroll_seconds})
+        self._finalize_clips(now, cfg)
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
                            dogs=len(in_zone), people=len(people) if cfg.person_suppression_enabled else 0,
                            fires_this_hour=self.safety.fires_last_hour(now), muted=muted,
                            snoozed_until_seconds=self.safety.snooze_remaining(now))
         return fired and not muted
+
+    def _finalize_clips(self, now: float, cfg) -> None:
+        """Encode any pending clips whose post-roll window has elapsed."""
+        if not self._pending_clips:
+            return
+        still_pending = []
+        for p in self._pending_clips:
+            if p["end"] > now:
+                still_pending.append(p)
+                continue
+            frames = self._clip_buffer.slice(p["fire_ts"] - cfg.clip_preroll_seconds, p["end"])
+            if frames:
+                try:
+                    path = encode_clip(frames, cfg.clip_fps, self.event_store.dir / f"{p['id']}.mp4")
+                    self.event_store.attach_clip(p["id"], path.name)
+                except Exception:
+                    log.exception("failed to encode clip for %s", p["id"])
+        self._pending_clips = still_pending
 
     def _capture_loop(self, stop: threading.Event) -> None:
         try:

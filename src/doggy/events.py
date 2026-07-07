@@ -44,15 +44,21 @@ class EventStore:
         event_dir: Path,
         max_events: int = 500,
         max_age_days: int = 30,
+        clip_retention: int = 10,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._dir = Path(event_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._max_events = max_events
         self._max_age_days = max_age_days
+        self._clip_retention = clip_retention
         self._clock = clock
         # Records kept in memory ordered oldest -> newest.
         self._records: list[EventRecord] = self._load()
+
+    @property
+    def dir(self) -> Path:
+        return self._dir
 
     @property
     def _jsonl(self) -> Path:
@@ -193,13 +199,31 @@ class EventStore:
             dropped.extend(survivors[:excess])
             survivors = survivors[excess:]
 
-        if not dropped:
-            return
-
         for record in dropped:
             self._delete_files(record)
         self._records = survivors
-        self._rewrite()
+
+        # Clips are far heavier than thumbnails: keep only the newest N of them,
+        # deleting older clip files (but keeping the event + its thumbnail).
+        clips_changed = self._enforce_clip_retention()
+
+        if dropped or clips_changed:
+            self._rewrite()
+
+    def _enforce_clip_retention(self) -> bool:
+        if self._clip_retention <= 0:  # 0 = unlimited
+            return False
+        # _records is oldest -> newest, so with_clips is too.
+        with_clips = [r for r in self._records if r.clip]
+        excess = len(with_clips) - self._clip_retention
+        if excess <= 0:
+            return False
+        for record in with_clips[:excess]:
+            path = self._dir / record.clip
+            if path.is_file():
+                path.unlink()
+            record.clip = None
+        return True
 
     def _rewrite(self) -> None:
         with self._jsonl.open("w") as fh:

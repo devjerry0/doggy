@@ -36,6 +36,14 @@ class TunableSettings(BaseModel):
     # A "dog" whose box overlaps a person's by at least this IoU is treated as a
     # misclassified person and suppressed (not fired on). High by design.
     person_iou_threshold: float = Field(0.85, ge=0.0, le=1.0)
+    # Opt-in short video clips per catch, cut from a rolling in-memory JPEG buffer
+    # (no continuous SD writes -- a clip is written only when a catch happens).
+    clips_enabled: bool = False
+    clip_window_seconds: float = 20
+    clip_preroll_seconds: float = 5
+    clip_postroll_seconds: float = 3
+    clip_fps: int = Field(6, ge=1)
+    clip_retention: int = Field(10, ge=0)   # 0 = unlimited
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "TunableSettings":

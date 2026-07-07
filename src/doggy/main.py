@@ -29,6 +29,7 @@ def main() -> None:
         settings.event_log_dir,
         settings.event_retention_max,
         settings.event_retention_days,
+        settings.clip_retention,
     )
     safety = SafetyGovernor(runtime, event_store)
 
@@ -39,7 +40,7 @@ def main() -> None:
     pipeline = Pipeline(
         settings=settings, detector=detector, camera=camera, alerter=alerter,
         runtime=runtime, status=status, raw_buffer=raw_buffer,
-        annotated_buffer=annotated_buffer, safety=safety,
+        annotated_buffer=annotated_buffer, safety=safety, event_store=event_store,
     )
 
     stop = threading.Event()
