@@ -105,6 +105,8 @@
   button:hover{border-color:var(--lamp);color:var(--lamp-soft)}
   button.primary{background:var(--lamp);border-color:var(--lamp);color:#1a130a}
   button.primary:hover{background:var(--lamp-soft);border-color:var(--lamp-soft);color:#1a130a}
+  #ptt{touch-action:none}
+  #ptt.talking{border-color:var(--lamp);color:var(--lamp-soft);box-shadow:0 0 0 1px var(--lamp) inset}
   .linkbtn{flex:0 0 auto;padding:.35rem .6rem;font-size:.78rem;color:var(--stone)}
   .linkbtn:hover{color:var(--ember);border-color:var(--ember)}
 
@@ -298,6 +300,7 @@
           <div class="btnrow">
             <button onclick="finishZone()">Save area</button>
             <button onclick="clearZone()">Clear area</button>
+            <button id="ptt">Hold to talk</button>
           </div>
           <div class="readout">
             <div class="stat"><div class="k" id="lbl_inview">Dogs in view</div><div class="v" id="dogs">–</div></div>
@@ -960,6 +963,59 @@ async function clearZone(){
   await patch({zone_enabled:false, zone_points:[]});
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
+function setupTalk(){
+  const btn = document.getElementById("ptt");
+  let ws, ctx, node, stream;
+  async function start(e){
+    e.preventDefault();
+    if (ws) return;                       // already talking
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(
+        {audio: {channelCount: 1, echoCancellation: true}});
+    } catch (err) {
+      // getUserMedia is blocked on plain http; the Pi's secure address is https.
+      alert("The microphone needs the https address. Open the secure dashboard and try again.");
+      return;
+    }
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://")
+                       + location.host + "/ws/talk");
+    ws.binaryType = "arraybuffer";
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(stream);
+    // ScriptProcessorNode is deprecated but dependency-free and fine for a
+    // one-listener appliance; AudioWorklet would need a served module file.
+    node = ctx.createScriptProcessor(4096, 1, 1);
+    const ratio = ctx.sampleRate / 16000;
+    node.onaudioprocess = ev => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const input = ev.inputBuffer.getChannelData(0);
+      const outLen = Math.floor(input.length / ratio);
+      const out = new Int16Array(outLen);
+      for (let i = 0; i < outLen; i++){          // index-step downsample to 16 kHz
+        const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      ws.send(out.buffer);
+    };
+    src.connect(node);
+    node.connect(ctx.destination);
+    btn.classList.add("talking");
+    btn.textContent = "Talking...";
+  }
+  function stop(){
+    if (node){ node.onaudioprocess = null; node.disconnect(); node = null; }
+    if (ctx){ ctx.close(); ctx = null; }
+    if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (ws){ ws.close(); ws = null; }
+    btn.classList.remove("talking");
+    btn.textContent = "Hold to talk";
+  }
+  btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointerup", stop);
+  btn.addEventListener("pointercancel", stop);
+  btn.addEventListener("pointerleave", stop);
+}
+setupTalk();
 loadSounds(); loadEvents(); refreshStats(); refreshLab();
 setInterval(poll, 500); poll();
 setInterval(() => { loadEvents(); refreshStats(); refreshLab(); }, 4000);
