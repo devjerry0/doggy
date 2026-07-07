@@ -16,6 +16,7 @@ from doggy.core.pacer import Pacer
 from doggy.hardware.power import PowerMonitor
 from doggy.decision.gate import FireGate
 from doggy.reaction.hub import DogCaught, ReactionHub
+from doggy.reaction.outcome import OutcomeWatcher
 from doggy.reaction.recorder import Recorder
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import CONFIDENCE_DECIMALS, FrameBuffer, StatusStore
@@ -36,7 +37,7 @@ class Pipeline:
                  runtime: RuntimeSettings, status: StatusStore,
                  raw_buffer: FrameBuffer, annotated_buffer: FrameBuffer,
                  gate: FireGate, recorder: Recorder, hub: ReactionHub,
-                 clip_service: ClipService,
+                 clip_service: ClipService, outcome: OutcomeWatcher,
                  clock: Callable[[], float] = time.monotonic,
                  rng: random.Random | None = None) -> None:
         self.settings = settings
@@ -51,6 +52,8 @@ class Pipeline:
         self.hub = hub
         # Per-frame stage here and a hub Reaction (registers its pending clip on fire).
         self.clip_service = clip_service
+        # Per-frame stage here and a hub Reaction (opens its incident on fire).
+        self.outcome = outcome
         self.clock = clock
         self.trigger = TriggerLogic(runtime, rng=rng or random.Random())
         self.inventory_tracker = InventoryTracker()
@@ -86,6 +89,9 @@ class Pipeline:
             self.gate.note_fire(now)
             self.hub.publish(DogCaught(record, frame, now))
             self.status.update(last_fire_ts=record.ts, last_fire_thumb=record.thumb)
+        # After the fire block so the fire frame that opens an incident is
+        # also its first observation.
+        self.outcome.on_frame(analysis, now, cfg)
         self.clip_service.finalize_due(now, cfg)
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
                            # targets counts what is drawn/"in view"; certainty still comes from candidates.
