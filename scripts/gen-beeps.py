@@ -78,7 +78,8 @@ def _lead():
 
 
 # The shipped default: 0.3s wake-silence + a "medium" rising sine chirp.
-DEFAULT = lambda: _lead() + chirp(sweeps=2, amp=0.72, f0=1400, f1=3700, dur=0.32, gap=0.08, harmonic=0.18)
+def DEFAULT():
+    return _lead() + chirp(sweeps=2, amp=0.72, f0=1400, f1=3700, dur=0.32, gap=0.08, harmonic=0.18)
 
 
 def main() -> None:

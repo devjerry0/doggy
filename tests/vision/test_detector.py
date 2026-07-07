@@ -20,7 +20,7 @@ def test_select_device_returns_known_value():
 def test_yolo_detects_dog_and_ignores_empty_room():
     from pathlib import Path
     from doggy.vision.detector import YoloDetector
-    from doggy.core.config import Settings, TunableSettings
+    from doggy.core.config import TunableSettings
     from doggy.core.runtime import RuntimeSettings
     import cv2
 

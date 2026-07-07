@@ -57,7 +57,7 @@ def main() -> None:
         settings=settings, analyzer=analyzer, camera=camera,
         runtime=runtime, status=status, raw_buffer=raw_buffer,
         annotated_buffer=annotated_buffer, gate=gate, recorder=recorder, hub=hub,
-        event_store=event_store, clip_service=clip_service,
+        clip_service=clip_service,
     )
 
     stop = threading.Event()

@@ -6,7 +6,8 @@ CFG = TunableSettings(detect_interval_seconds=0.5, thermal_enabled=True,
                       thermal_cooldown_interval_seconds=1.5)
 
 def test_read_temp_c_parses_millidegrees(tmp_path):
-    f = tmp_path / "temp"; f.write_text("78123\n")
+    f = tmp_path / "temp"
+    f.write_text("78123\n")
     assert ThermalGovernor(str(f)).read_temp_c() == 78.123
 
 def test_read_temp_c_missing_file_returns_none(tmp_path):
@@ -39,7 +40,8 @@ def test_interval_never_faster_than_normal():
 def test_governor_picks_cooldown_when_hot(tmp_path):
     from doggy.core.config import TunableSettings
     from doggy.hardware.thermal import ThermalGovernor
-    f = tmp_path / "temp"; f.write_text("83000\n")
+    f = tmp_path / "temp"
+    f.write_text("83000\n")
     g = ThermalGovernor(str(f))
     cfg = TunableSettings(detect_interval_seconds=0.5, thermal_cooldown_interval_seconds=1.5)
     assert g.effective_interval(g.read_temp_c(), cfg) == 1.5

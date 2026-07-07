@@ -12,7 +12,6 @@ from doggy.vision.camera import Camera
 from doggy.reaction.clips import ClipService
 from doggy.core.config import Settings
 from doggy.vision.analysis import DetectionAnalyzer
-from doggy.events.store import EventStore
 from doggy.core.pacer import Pacer
 from doggy.hardware.power import PowerMonitor
 from doggy.decision.gate import FireGate
@@ -37,7 +36,7 @@ class Pipeline:
                  runtime: RuntimeSettings, status: StatusStore,
                  raw_buffer: FrameBuffer, annotated_buffer: FrameBuffer,
                  gate: FireGate, recorder: Recorder, hub: ReactionHub,
-                 event_store: EventStore, clip_service: ClipService,
+                 clip_service: ClipService,
                  clock: Callable[[], float] = time.monotonic,
                  rng: random.Random | None = None) -> None:
         self.settings = settings
@@ -50,7 +49,6 @@ class Pipeline:
         self.gate = gate
         self.recorder = recorder
         self.hub = hub
-        self.event_store = event_store
         # Per-frame stage here and a hub Reaction (registers its pending clip on fire).
         self.clip_service = clip_service
         self.clock = clock

@@ -45,6 +45,8 @@ USB webcam -> capture thread -> YOLO (NCNN, on-CPU)
 
 A FastAPI app streams the annotated view over MJPEG and exposes the live-tunable settings. A governor reads the CPU temperature each loop and paces detection to keep the board below its throttle point.
 
+The package layout and the design patterns behind it are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Quick start (dev, on a Mac)
 
 ```sh

@@ -53,7 +53,7 @@ def test_pipeline_fires_after_confirmation(tmp_path):
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
-        event_store=store, clip_service=clips,
+        clip_service=clips,
         clock=lambda: next(clock),
         rng=random.Random(0),
     )
@@ -83,7 +83,7 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        event_store=store, clip_service=clips,
+        clip_service=clips,
         clock=lambda: 0.0,
         rng=random.Random(0),
     )
@@ -112,7 +112,7 @@ def test_pipeline_ignores_dogs_outside_zone(tmp_path):
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        event_store=store, clip_service=clips, clock=lambda: 0.0,
+        clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     fired = pipe.run_once(np.zeros((100, 100, 3), np.uint8))
@@ -139,7 +139,7 @@ def test_pipeline_fires_for_dog_inside_zone(tmp_path):
         runtime=runtime, status=StatusStore(),
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
-        event_store=store, clip_service=clips, clock=lambda: 0.0,
+        clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     assert pipe.run_once(np.zeros((100, 100, 3), np.uint8)) is False
@@ -165,7 +165,7 @@ def test_pipeline_records_trigger_confidence_not_empty_fire_frame(tmp_path):
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        event_store=store, clip_service=clips,
+        clip_service=clips,
         clock=lambda: next(clock), rng=random.Random(0),
     )
     frame = np.zeros((16, 16, 3), np.uint8)
@@ -192,7 +192,7 @@ def test_pipeline_suppresses_person_misclassified_as_dog(tmp_path):
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        event_store=store, clip_service=clips, clock=lambda: 0.0,
+        clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)
@@ -221,7 +221,7 @@ def test_pipeline_real_dog_near_person_still_fires(tmp_path):
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
-        event_store=store, clip_service=clips, clock=lambda: 0.0,
+        clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)
@@ -251,7 +251,7 @@ def test_pipeline_finalizes_clip_after_postroll(tmp_path):
         runtime=runtime, status=StatusStore(),
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
         gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
-        event_store=store, clip_service=clips,
+        clip_service=clips,
         clock=lambda: next(clock), rng=random.Random(0),
     )
     frame = np.zeros((16, 16, 3), np.uint8)
