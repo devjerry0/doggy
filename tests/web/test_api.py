@@ -1,3 +1,6 @@
+import io
+import zipfile
+
 import numpy as np
 from fastapi.testclient import TestClient
 
@@ -417,6 +420,39 @@ def test_ca_pem_404_when_file_missing(tmp_path):
     s = Settings(event_log_dir=tmp_path, ca_cert=tmp_path / "gone.pem")
     c = TestClient(create_app(s, *_serve_deps(s)))
     assert c.get("/ca.pem").status_code == 404
+
+
+def test_export_returns_zip_with_events(tmp_path):
+    store, _ = _seeded_store(tmp_path, 1)
+    c = _app_with_store(tmp_path, store)
+    r = c.get("/api/export")
+    assert r.status_code == 200
+    assert "watchdoggy-export.zip" in r.headers["content-disposition"]
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    names = z.namelist()
+    assert "events.jsonl" in names
+    assert any(n.endswith(".jpg") for n in names)
+
+
+def test_export_omits_deleted_thumb(tmp_path):
+    store, _ = _seeded_store(tmp_path, 1)
+    thumb = store.list()[0].thumb
+    (tmp_path / thumb).unlink()  # file vanished from disk (concurrent delete/prune)
+    c = _app_with_store(tmp_path, store)
+    r = c.get("/api/export")
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "events.jsonl" in names
+    assert thumb not in names  # missing file skipped, no crash
+
+
+def test_index_has_kiosk_and_export(tmp_path):
+    store, _ = _seeded_store(tmp_path, 0)
+    c = _app_with_store(tmp_path, store)
+    html = c.get("/").text
+    assert "Fullscreen" in html
+    assert "Export all" in html
+    assert "/api/export" in html
 
 
 def test_snooze_endpoint_blocks_then_cancel_re_allows(tmp_path):

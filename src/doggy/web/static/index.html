@@ -71,6 +71,8 @@
   body[data-state="state-spotted"] #vidwrap{border-color:var(--ember);
            box-shadow:0 0 0 3px rgba(228,87,46,.28)}
   #live{max-width:100%;display:block}
+  #vidwrap:fullscreen{border:none;border-radius:0}
+  #vidwrap:fullscreen #live{width:100%;height:100%;object-fit:contain}
   #zonecanvas{position:absolute;left:0;top:0;cursor:crosshair;touch-action:manipulation}
   .scrim{position:absolute;left:0;right:0;height:52px;pointer-events:none;z-index:2}
   .scrim.top{top:0;background:linear-gradient(rgba(0,0,0,.45),transparent)}
@@ -107,7 +109,7 @@
   button.primary:hover{background:var(--lamp-soft);border-color:var(--lamp-soft);color:#1a130a}
   #ptt{touch-action:none}
   #ptt.talking{border-color:var(--lamp);color:var(--lamp-soft);box-shadow:0 0 0 1px var(--lamp) inset}
-  .linkbtn{flex:0 0 auto;padding:.35rem .6rem;font-size:.78rem;color:var(--stone)}
+  .linkbtn{flex:0 0 auto;padding:.35rem .6rem;font-size:.78rem;color:var(--stone);text-decoration:none}
   .linkbtn:hover{color:var(--ember);border-color:var(--ember)}
 
   /* ---- Fields ---- */
@@ -301,6 +303,7 @@
             <button onclick="finishZone()">Save area</button>
             <button onclick="clearZone()">Clear area</button>
             <button id="ptt">Hold to talk</button>
+            <button id="fullscreen_btn" onclick="goFullscreen()">Fullscreen</button>
           </div>
           <div class="readout">
             <div class="stat"><div class="k" id="lbl_inview">Dogs in view</div><div class="v" id="dogs">–</div></div>
@@ -448,7 +451,10 @@
       <div class="card c-log">
         <div class="card-head">
           <h2>Catch log</h2>
-          <button class="linkbtn" onclick="clearEvents()">Clear all</button>
+          <div>
+            <a class="linkbtn" href="/api/export" download>Export all</a>
+            <button class="linkbtn" onclick="clearEvents()">Clear all</button>
+          </div>
         </div>
         <div class="events" id="events"></div>
       </div>
@@ -778,6 +784,12 @@ async function clearEvents(){
   await fetch("/api/events/clear", {method:"POST"});
   _evKey = ""; loadEvents();
 }
+
+// ---- Kiosk ----
+function goFullscreen(){ document.getElementById("vidwrap").requestFullscreen(); }
+// Hide the button where the Fullscreen API is unavailable (e.g. iOS Safari).
+if (!document.documentElement.requestFullscreen)
+  document.getElementById("fullscreen_btn").style.display = "none";
 
 // ---- Snooze ----
 async function snooze(minutes){
