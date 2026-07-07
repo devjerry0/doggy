@@ -85,7 +85,8 @@ class Pipeline:
             self.status.update(last_fire_ts=record.ts, last_fire_thumb=record.thumb)
         self.clip_service.finalize_due(now, cfg)
         self.status.update(state=self.trigger.state.value, confidence=round(top, CONFIDENCE_DECIMALS),
-                           targets=len(analysis.candidates),
+                           # targets counts what is drawn/"in view"; certainty still comes from candidates.
+                           targets=len(analysis.targets),
                            people=len(analysis.people) if cfg.person_suppression_enabled else 0,
                            fires_this_hour=self.gate.fires_last_hour(now), muted=muted,
                            snoozed_until_seconds=self.gate.snooze_remaining(now))

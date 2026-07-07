@@ -67,6 +67,9 @@ class TunableSettings(BaseModel):
                 v = json.loads(s)
             else:
                 v = [part.strip() for part in s.split(",") if part.strip()]
+        if not isinstance(v, (list, tuple)):
+            # ValueError -> ValidationError -> 422; a bare TypeError would 500.
+            raise ValueError("watch classes must be a list of class names")
         labels = tuple(dict.fromkeys(v))  # de-dupe, keep order
         unknown = [x for x in labels if x not in cls._ALLOWED_TARGETS]
         if unknown:

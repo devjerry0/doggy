@@ -117,7 +117,8 @@ def test_pipeline_ignores_dogs_outside_zone(tmp_path):
     )
     fired = pipe.run_once(np.zeros((100, 100, 3), np.uint8))
     assert fired is False
-    assert status.snapshot().targets == 0
+    # The out-of-zone dog can't fire, but it IS detected (drawn), so it counts.
+    assert status.snapshot().targets == 1
 
 def test_pipeline_fires_for_dog_inside_zone(tmp_path):
     settings = Settings(zone_enabled=True,
@@ -229,6 +230,35 @@ def test_pipeline_real_dog_near_person_still_fires(tmp_path):
     assert fired[1] is True
     assert status.snapshot().targets == 1
     assert alerter.calls == 1
+
+
+def test_pipeline_monitor_mode_counts_targets_without_firing(tmp_path):
+    # Monitor mode (empty alert set): the dog shows as "in view" every frame, but
+    # nothing can ever fire and the trigger never even enters CONFIRMING -- the
+    # timing config here would fire on the 2nd frame if "dog" were alertable.
+    settings = Settings(target_labels=("dog",), alert_labels=(),
+                        confirm_seconds=0.0, window_m=1, window_n=1,
+                        cooldown_min_seconds=5, cooldown_max_seconds=5)
+    runtime = RuntimeSettings(settings.tunable())
+    dog = [Detection("dog", 0.9, (0, 0, 10, 10))]
+    status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
+    clock = iter([0.0, 1.0, 2.0])
+    pipe = Pipeline(
+        settings=settings, analyzer=_analyzer(StubDetector([dog, dog, dog])),
+        camera=FakeCamera([np.zeros((16, 16, 3), np.uint8)], loop=True),
+        runtime=runtime, status=status,
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        clip_service=clips,
+        clock=lambda: next(clock), rng=random.Random(0),
+    )
+    frame = np.zeros((16, 16, 3), np.uint8)
+    for _ in range(3):
+        assert pipe.run_once(frame) is False
+        assert status.snapshot().targets == 1
+        assert status.snapshot().state == "IDLE"   # never CONFIRMING
 
 
 def test_pipeline_finalizes_clip_after_postroll(tmp_path):

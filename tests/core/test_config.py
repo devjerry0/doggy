@@ -39,6 +39,15 @@ def test_target_labels_rejects_unknown_and_empty():
         TunableSettings(target_labels=[])
 
 
+def test_target_labels_rejects_non_list_garbage():
+    # Bad PATCH payloads must surface as ValidationError (-> HTTP 422), never a
+    # bare TypeError from inside the validator (-> HTTP 500).
+    with pytest.raises(ValidationError):
+        TunableSettings(target_labels=5)
+    with pytest.raises(ValidationError):
+        TunableSettings(target_labels=None)
+
+
 def test_alert_labels_subset_rule():
     # detect-only birds: valid; alerting on an undetected class: not.
     ok = TunableSettings(target_labels="dog,bird", alert_labels="dog")
