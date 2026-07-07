@@ -145,6 +145,20 @@
              justify-self:center;cursor:pointer}
   .watchgrid input:disabled{opacity:.3;cursor:default}
 
+  /* ---- Arming schedule editor ---- */
+  .win-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
+           padding:.7rem 0;border-top:1px solid var(--seam)}
+  .daychips{display:flex;gap:.25rem;flex:1 1 auto}
+  .chip{padding:.32rem 0;width:1.9rem;text-align:center;font-family:var(--mono);
+        font-size:.72rem;border-radius:6px;border:1px solid var(--seam);
+        background:var(--panel2);color:var(--stone);cursor:pointer}
+  .chip.on{background:var(--lamp);border-color:var(--lamp);color:#1a130a}
+  .win-times{display:flex;align-items:center;gap:.4rem}
+  .win-row input[type=time]{font:inherit;font-size:.85rem;padding:.4rem .5rem;border-radius:7px;
+        border:1px solid var(--seam);background:var(--panel2);color:var(--linen)}
+  .win-sep{color:var(--stone);font-size:.82rem}
+  .win-empty{color:var(--stone);font-size:.82rem;padding:.6rem 0}
+
   details{border-top:1px solid var(--seam);margin-top:.4rem}
   details summary{cursor:pointer;list-style:none;padding:.9rem 0 .3rem;color:var(--stone);
                   font-family:var(--mono);font-size:.66rem;font-weight:600;
@@ -313,6 +327,15 @@
         <div class="toggle">
           <div><div class="t-label">Ignore people</div><div class="t-desc">Don't react to a person mistaken for a dog</div></div>
           <label class="switch"><input id="person_suppression_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="toggle">
+          <div><div class="t-label">On a schedule</div><div class="t-desc">Only react during the times you pick. It keeps watching around the clock either way.</div></div>
+          <label class="switch"><input id="schedule_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="field" id="schedule_editor" style="display:none">
+          <div class="desc">Pick the days and hours it should react. Outside these it's off duty but still watching.</div>
+          <div id="windows"></div>
+          <div class="btnrow"><button onclick="addWindow()">Add times</button></div>
         </div>
 
         <div class="field">
@@ -492,6 +515,81 @@ document.getElementById("clips_enabled").addEventListener("change", e => patch({
 document.getElementById("show_inventory_boxes").addEventListener("change", e =>
   patch({show_inventory_boxes:e.target.checked}));
 document.getElementById("selected_sound").addEventListener("change", e => patch({selected_sound:e.target.value}));
+document.getElementById("schedule_enabled").addEventListener("change", e => {
+  patch({schedule_enabled:e.target.checked});
+  document.getElementById("schedule_editor").style.display = e.target.checked ? "" : "none";
+});
+
+// ---- Arming schedule editor ----
+// windowsData mirrors the server's armed_windows; every change patches the whole
+// array. All timing is the server's job (see armed_state) -- this only edits days
+// and "HH:MM" strings.
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+const winBox = document.getElementById("windows");
+let windowsData = [];
+let _winKey = null;         // JSON of the last server state we rendered
+let windowsTouchedAt = 0;   // pause server-sync briefly after a local edit
+function renderWindows(){
+  if (!windowsData.length){
+    winBox.innerHTML = '<div class="win-empty">No times yet. Add times to choose when it reacts.</div>';
+    return;
+  }
+  winBox.innerHTML = windowsData.map((w, i) => {
+    const chips = DAY_LETTERS.map((ltr, d) =>
+      '<button type="button" class="chip' + (w.days.includes(d) ? ' on' : '')
+      + '" data-idx="' + i + '" data-day="' + d + '">' + ltr + '</button>').join("");
+    return '<div class="win-row">'
+      + '<div class="daychips">' + chips + '</div>'
+      + '<div class="win-times">'
+      + '<input type="time" data-idx="' + i + '" data-edge="start" value="' + w.start + '">'
+      + '<span class="win-sep">to</span>'
+      + '<input type="time" data-idx="' + i + '" data-edge="end" value="' + w.end + '">'
+      + '<button type="button" class="linkbtn" data-idx="' + i + '" data-remove="1">Remove</button>'
+      + '</div></div>';
+  }).join("");
+}
+function pushWindows(){
+  windowsTouchedAt = Date.now();
+  _winKey = null;            // force a resync (and revert) if the server rejects it
+  patch({armed_windows: windowsData});
+}
+function addWindow(){
+  windowsData.push({days:[0,1,2,3,4], start:"21:00", end:"07:00"});
+  renderWindows();
+  pushWindows();
+}
+winBox.addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if (chip){
+    const w = windowsData[+chip.dataset.idx], d = +chip.dataset.day;
+    const at = w.days.indexOf(d);
+    if (at >= 0){ w.days.splice(at, 1); } else { w.days.push(d); w.days.sort((a,b)=>a-b); }
+    chip.classList.toggle("on");
+    pushWindows();
+    return;
+  }
+  const rm = e.target.closest("[data-remove]");
+  if (rm){
+    windowsData.splice(+rm.dataset.idx, 1);
+    renderWindows();
+    pushWindows();
+  }
+});
+winBox.addEventListener("change", e => {
+  if (e.target.matches('input[type=time]')){
+    windowsData[+e.target.dataset.idx][e.target.dataset.edge] = e.target.value;
+    pushWindows();
+  }
+});
+function syncWindows(serverWindows){
+  if (Date.now() - windowsTouchedAt < 1500) return;   // user is mid-edit
+  if (winBox.contains(document.activeElement)) return;
+  const key = JSON.stringify(serverWindows);
+  if (key === _winKey) return;                         // unchanged since last render
+  _winKey = key;
+  windowsData = serverWindows.map(w => ({days:[...w.days], start:w.start, end:w.end}));
+  renderWindows();
+}
 
 // ---- Watch-for grid ----
 function targetNoun(labels, plural){
@@ -577,6 +675,15 @@ function relTime(sec){
   const h = Math.round(m / 60);
   if (h < 24) return h + "h ago";
   return Math.round(h / 24) + "d ago";
+}
+// Coarse "in Xh Ym" countdown for the off-duty label (server owns the math).
+function durLabel(sec){
+  if (sec == null) return "a while";
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  if (h && m) return h + "h " + m + "m";
+  if (h) return h + "h";
+  return Math.max(1, m) + "m";
 }
 async function deleteEvent(id){
   await fetch("/api/events/" + encodeURIComponent(id), {method:"DELETE"});
@@ -727,6 +834,9 @@ async function poll(){
   if (s.state === "CONFIRMING"){
     word = fireNoun.charAt(0).toUpperCase() + fireNoun.slice(1) + " spotted";
   }
+  // Off-duty (arming schedule) overrides the readout: it still watches, but
+  // reactions are held, so the honest headline is "Off duty".
+  if (s.armed === false){ word = "Off duty"; cls = "state-cooling"; }
   document.getElementById("statetext").textContent = word;
   document.getElementById("statepill").className = "pill " + cls;
   document.body.dataset.state = cls;
@@ -775,15 +885,24 @@ async function poll(){
 
   document.getElementById("clips_enabled").checked = s.settings.clips_enabled;
   document.getElementById("show_inventory_boxes").checked = s.settings.show_inventory_boxes;
+  document.getElementById("schedule_enabled").checked = s.settings.schedule_enabled;
+  document.getElementById("schedule_editor").style.display = s.settings.schedule_enabled ? "" : "none";
+  syncWindows(s.settings.armed_windows || []);
   const selEl = document.getElementById("selected_sound");
   if (document.activeElement !== selEl){
     const want = s.settings.selected_sound || "random";
     if ([...selEl.options].some(o => o.value === want)){ selEl.value = want; }
   }
 
-  // Snooze (snoozed_until_seconds is refreshed by the pipeline each loop)
+  // Off duty (arming schedule) takes over the snooze row: snoozing is moot when
+  // reactions are already held. Otherwise show snooze state as usual.
   const snz = s.snoozed_until_seconds || 0;
-  if (snz > 0){
+  if (s.armed === false){
+    document.getElementById("snooze_label").textContent =
+      "Back on duty in " + durLabel(s.next_change_seconds);
+    document.getElementById("snooze_btns").style.display = "none";
+    document.getElementById("snooze_resume").style.display = "none";
+  } else if (snz > 0){
     document.getElementById("snooze_label").textContent =
       "Snoozed — " + Math.max(1, Math.ceil(snz / 60)) + "m left";
     document.getElementById("snooze_btns").style.display = "none";

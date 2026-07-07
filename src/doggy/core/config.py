@@ -1,11 +1,44 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# "HH:MM" on a 24-hour clock (00:00 .. 23:59).
+_HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
+
+class ArmedWindow(BaseModel):
+    """One weekly arming window: on the given days, react from ``start`` to
+    ``end`` ("HH:MM"). When ``end <= start`` the window wraps past midnight and
+    belongs to its start day (e.g. 21:00-07:00 covers that night into the next
+    morning)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    days: tuple[int, ...]  # 0 = Monday .. 6 = Sunday
+    start: str
+    end: str
+
+    @field_validator("start", "end")
+    @classmethod
+    def _valid_time(cls, v: str) -> str:
+        if not _HHMM.fullmatch(v):
+            raise ValueError(f"time must be HH:MM (00:00-23:59), got {v!r}")
+        return v
+
+    @field_validator("days")
+    @classmethod
+    def _valid_days(cls, v: tuple[int, ...]) -> tuple[int, ...]:
+        if not v:
+            raise ValueError("pick at least one day for the window")
+        if any(d < 0 or d > 6 for d in v):
+            raise ValueError("day must be 0..6 (0=Monday)")
+        return v
 
 
 class TunableSettings(BaseModel):
@@ -63,6 +96,12 @@ class TunableSettings(BaseModel):
     escalation_seconds: float = Field(8.0, ge=1)
     escalation_max_strikes: int = Field(3, ge=1)
     escalation_volume_step: float = Field(0.2, ge=0, le=1)
+    # Weekly arming schedule: when on, reactions only happen inside armed_windows
+    # (detection keeps running around the clock). Empty windows = always armed.
+    # NoDecode: the .env form is a JSON string; _parse_windows json.loads it (the
+    # same trick the label fields use for their comma form).
+    schedule_enabled: bool = False
+    armed_windows: Annotated[tuple[ArmedWindow, ...], NoDecode] = ()
 
     # Mirrors doggy.vision.detection.ANIMAL_TARGETS (importing it would create
     # a core -> vision cycle).
@@ -85,6 +124,16 @@ class TunableSettings(BaseModel):
         if unknown:
             raise ValueError(f"unknown watch classes: {unknown}")
         return labels
+
+    @field_validator("armed_windows", mode="before")
+    @classmethod
+    def _parse_windows(cls, v):
+        # NoDecode hands the raw .env string here; other callers pass a list of
+        # dicts/models straight through for pydantic to coerce into ArmedWindow.
+        if isinstance(v, str):
+            s = v.strip()
+            v = json.loads(s) if s else []
+        return v
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "TunableSettings":

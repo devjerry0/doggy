@@ -44,6 +44,38 @@ def test_patch_rejects_invalid(tmp_path):
     assert r.status_code == 422
 
 
+def test_status_exposes_armed_fields(tmp_path):
+    c, _, _ = client(tmp_path)
+    body = c.get("/api/status").json()
+    assert body["armed"] is True             # default: no schedule -> always armed
+    assert body["next_change_seconds"] is None
+    assert body["settings"]["schedule_enabled"] is False
+    assert body["settings"]["armed_windows"] == []
+
+
+def test_patch_armed_windows_round_trips(tmp_path):
+    c, runtime, _ = client(tmp_path)
+    win = [{"days": [0, 1, 2, 3, 4], "start": "21:00", "end": "07:00"}]
+    r = c.patch("/api/settings", json={"schedule_enabled": True, "armed_windows": win})
+    assert r.status_code == 200
+    assert runtime.get().schedule_enabled is True
+    assert c.get("/api/status").json()["settings"]["armed_windows"] == win
+
+
+def test_patch_rejects_bad_armed_window(tmp_path):
+    c, _, _ = client(tmp_path)
+    bad = [{"days": [0], "start": "24:61", "end": "07:00"}]
+    assert c.patch("/api/settings", json={"armed_windows": bad}).status_code == 422
+
+
+def test_index_has_schedule_controls(tmp_path):
+    c, _, _ = client(tmp_path)
+    html = c.get("/").text
+    assert "On a schedule" in html
+    assert "Add times" in html
+    assert 'id="schedule_enabled"' in html
+
+
 def test_test_sound_triggers_alerter(tmp_path):
     c, _, alerter = client(tmp_path)
     assert c.post("/api/test-sound").status_code == 200

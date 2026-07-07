@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from doggy.core.config import Settings, TunableSettings
 from doggy.decision.gate import FireGate
 from doggy.core.runtime import RuntimeSettings
@@ -8,6 +10,17 @@ def _gate(**over):
     base.update(over)
     rs = RuntimeSettings(TunableSettings(**base))
     return FireGate(rs)
+
+
+# 2026-07-06 is a Monday; weeknights 21:00 -> 07:00.
+_WINDOW_NIGHT = {"days": [0, 1, 2, 3, 4], "start": "21:00", "end": "07:00"}
+
+
+def _scheduled_gate(wall_epoch):
+    rs = RuntimeSettings(TunableSettings(
+        safety_enabled=True, max_fires_per_hour=6,
+        schedule_enabled=True, armed_windows=[_WINDOW_NIGHT]))
+    return FireGate(rs, wall_clock=lambda: wall_epoch)
 
 
 def test_allows_when_enabled_and_under_limit():
@@ -71,3 +84,25 @@ def test_gate_allow_note_fire_preserves_hourly_cap():
     gate.note_fire(10.0)
     assert gate.allow(now=20.0) is False          # cap hit
     assert gate.allow(now=3610.0) is True         # oldest aged out
+
+
+def test_schedule_off_duty_blocks_allow_and_escalation():
+    outside = datetime(2026, 7, 6, 12, 0).timestamp()   # Monday noon: off duty
+    g = _scheduled_gate(outside)
+    assert g.allow(now=0.0) is False
+    assert g.allow_escalation(now=0.0) is False
+
+
+def test_schedule_on_duty_allows():
+    inside = datetime(2026, 7, 6, 23, 0).timestamp()   # Monday night: armed
+    g = _scheduled_gate(inside)
+    assert g.allow(now=0.0) is True
+    assert g.allow_escalation(now=0.0) is True
+
+
+def test_schedule_disabled_ignores_wall_clock():
+    # Default schedule_enabled=False -> the wall clock is irrelevant.
+    rs = RuntimeSettings(TunableSettings(safety_enabled=True, max_fires_per_hour=6))
+    g = FireGate(rs, wall_clock=lambda: 0.0)
+    assert g.allow(now=0.0) is True
+    assert g.allow_escalation(now=0.0) is True
