@@ -279,6 +279,66 @@ def test_lab_stats_ignores_events_without_sound(tmp_path):
     assert st["sounds"] == [] and st["thefts_this_week"] == 0
 
 
+def test_report_card_quiet_week_when_no_events(tmp_path):
+    now = 1893456000.0  # 2030-01-01 UTC: far from the real clock, like the lab tests
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    rc = s.stats()["report_card"]
+    assert rc["grade"] == "A"
+    assert rc["summary"] == "A quiet week."
+    assert rc["attempts"] == 0 and rc["attempts_prev"] == 0
+    assert rc["deterred_rate"] is None
+
+
+def test_report_card_attempts_rose_with_weak_deterrence(tmp_path):
+    now = 1893456000.0
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    # This week: 8 attempts, all completed, 4 deterred (quick, empty-handed).
+    for i in range(4):
+        _catch(s, "chirp.wav", now - 600 + i, float(i), clear=3.0)
+    for i in range(4):
+        _catch(s, "chirp.wav", now - 500 + i, float(4 + i), clear=30.0)  # too slow
+    # Prev week: 3 attempts, 8 days ago.
+    for i in range(3):
+        _catch(s, "chirp.wav", now - 8 * 86400 + i, float(10 + i), clear=3.0)
+    rc = s.stats()["report_card"]
+    # 100 - min(40, 5*8) = 60; rose (8 > 3) -> 30; x 4/8 deterred -> 15 -> F.
+    assert rc["grade"] == "F"
+    assert rc["attempts"] == 8 and rc["attempts_prev"] == 3
+    assert rc["deterred_rate"] == pytest.approx(0.5)
+    assert rc["summary"] == "8 attempts, 4 of 8 deterred, up from 3 last week."
+
+
+def test_report_card_attempts_fell_all_deterred(tmp_path):
+    now = 1893456000.0
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    # This week: 5 attempts, all deterred. Prev week: 9.
+    for i in range(5):
+        _catch(s, "hawk.wav", now - 600 + i, float(i), clear=3.0)
+    for i in range(9):
+        _catch(s, "hawk.wav", now - 8 * 86400 + i, float(10 + i), clear=3.0)
+    rc = s.stats()["report_card"]
+    # 100 - min(40, 5*5) = 75; fell (5 < 9) -> +10 = 85; x 1.0 -> 85 -> mid-B.
+    assert rc["grade"] == "B"
+    assert rc["attempts"] == 5 and rc["attempts_prev"] == 9
+    assert rc["deterred_rate"] == pytest.approx(1.0)
+    assert rc["summary"] == "5 attempts, all deterred, down from 9 last week."
+
+
+def test_report_card_no_outcome_clause_when_nothing_completed(tmp_path):
+    now = 1893456000.0
+    s = EventStore(tmp_path, 100, 0, clock=lambda: now)
+    # This week: 5 attempts still awaiting the outcome watcher. Prev week: 9.
+    for i in range(5):
+        _catch(s, "hawk.wav", now - 600 + i, float(i), outcome=False)
+    for i in range(9):
+        _catch(s, "hawk.wav", now - 8 * 86400 + i, float(10 + i), clear=3.0)
+    rc = s.stats()["report_card"]
+    # 100 - 25 = 75; fell -> 85; nothing completed -> no deterrence factor -> B.
+    assert rc["grade"] == "B"
+    assert rc["deterred_rate"] is None
+    assert rc["summary"] == "5 attempts, down from 9 last week."
+
+
 def test_backfills_wall_time_from_thumb_mtime(tmp_path):
     import os
     (tmp_path / "fire_5.jpg").write_bytes(b"\xff\xd8\xff")

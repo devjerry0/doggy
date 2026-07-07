@@ -423,6 +423,7 @@
         <div class="act-top"><span class="num" id="act_today">–</span> today, <span class="num" id="act_week">–</span> this week</div>
         <div class="bars" id="act_bars"></div>
         <div class="act-notes">
+          <div class="act-note" id="report_card" style="display:none"></div>
           <span class="act-note" id="act_busy" style="display:none"></span>
           <span class="act-note" id="act_lat" style="display:none"></span>
         </div>
@@ -620,6 +621,9 @@ async function refreshStats(){
   const lat = document.getElementById("act_lat");
   if (st.avg_latency_s == null){ lat.style.display = "none"; }
   else { lat.style.display = ""; lat.textContent = "Avg reaction " + secs(st.avg_latency_s); }
+  const rc = st.report_card, rcEl = document.getElementById("report_card");
+  if (!rc){ rcEl.style.display = "none"; }
+  else { rcEl.style.display = ""; rcEl.textContent = "This week: " + rc.grade + ". " + rc.summary; }
 }
 function hourLabel(h){
   const ampm = h < 12 ? "am" : "pm";
