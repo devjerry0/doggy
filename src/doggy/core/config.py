@@ -45,6 +45,11 @@ class TunableSettings(BaseModel):
     # A "dog" whose box overlaps a person's by at least this IoU is treated as a
     # misclassified person and suppressed (not fired on). High by design.
     person_iou_threshold: float = Field(0.85, ge=0.0, le=1.0)
+    # Counter inventory: food/tableware detection for the readout + theft diffs.
+    inventory_enabled: bool = True
+    # Overhead food shots score low; independent, laxer threshold.
+    inventory_confidence: float = Field(0.4, ge=0.0, le=1.0)
+    show_inventory_boxes: bool = False
     # Opt-in short video clips per catch, cut from a rolling in-memory JPEG buffer
     # (no continuous SD writes -- a clip is written only when a catch happens).
     clips_enabled: bool = False

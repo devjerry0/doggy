@@ -11,7 +11,7 @@ import numpy as np
 from doggy.vision.camera import Camera
 from doggy.reaction.clips import ClipService
 from doggy.core.config import Settings
-from doggy.vision.analysis import DetectionAnalyzer
+from doggy.vision.analysis import DetectionAnalyzer, InventoryTracker
 from doggy.core.pacer import Pacer
 from doggy.hardware.power import PowerMonitor
 from doggy.decision.gate import FireGate
@@ -53,6 +53,7 @@ class Pipeline:
         self.clip_service = clip_service
         self.clock = clock
         self.trigger = TriggerLogic(runtime, rng=rng or random.Random())
+        self.inventory_tracker = InventoryTracker()
         self.pacer = Pacer(clock=clock)
         self.governor = ThermalGovernor()
         self.power = PowerMonitor(clock=clock)
@@ -62,11 +63,13 @@ class Pipeline:
         now = self.clock()
         cfg = self.runtime.get()
         analysis = self.analyzer.analyze(frame, cfg)
+        on_counter = self.inventory_tracker.update([d.label for d in analysis.inventory])
         # `targets` are drawn; `candidates` are the in-zone subset that may trigger.
         show_people = analysis.people if cfg.person_suppression_enabled else None
         points = cfg.zone_points if cfg.zone_enabled else []
         annotated = annotate(frame, analysis.targets, analysis.candidates, points,
-                             people=show_people)
+                             people=show_people,
+                             inventory=analysis.inventory if cfg.show_inventory_boxes else None)
         self.annotated_buffer.set(annotated)
         self.clip_service.on_frame(annotated, now, cfg)
         top = max((d.confidence for d in analysis.candidates), default=0.0)
@@ -88,6 +91,7 @@ class Pipeline:
                            # targets counts what is drawn/"in view"; certainty still comes from candidates.
                            targets=len(analysis.targets),
                            people=len(analysis.people) if cfg.person_suppression_enabled else 0,
+                           on_counter=on_counter,
                            fires_this_hour=self.gate.fires_last_hour(now), muted=muted,
                            snoozed_until_seconds=self.gate.snooze_remaining(now))
         return fired and not muted

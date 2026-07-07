@@ -94,6 +94,8 @@
   .stat .k{color:var(--stone);font-size:.72rem}
   .stat .v{font-family:var(--mono);font-size:1.45rem;font-weight:500;line-height:1.2;
            margin-top:.15rem;font-variant-numeric:tabular-nums}
+  .oncounter{grid-column:1/-1;font-size:.8rem;color:var(--stone);margin-top:.2rem}
+  .oncounter .v{font-family:var(--mono);color:var(--linen);font-size:.8rem}
 
   /* ---- Buttons ---- */
   .btnrow{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.9rem;align-items:center}
@@ -275,6 +277,7 @@
             <div class="stat"><div class="k">People in view</div><div class="v" id="people">–</div></div>
             <div class="stat"><div class="k" id="lbl_certainty">Certainty it's a dog</div><div class="v" id="conf">–</div></div>
             <div class="stat"><div class="k">Reactions this hour</div><div class="v" id="fires">–</div></div>
+            <div class="oncounter"><span class="k">On the counter</span> <span class="v" id="on_counter">–</span></div>
           </div>
           <div class="snooze">
             <div class="snooze-label" id="snooze_label">Snooze the deterrent</div>
@@ -350,6 +353,10 @@
         <div class="toggle">
           <div><div class="t-label">Save video clips</div><div class="t-desc">Keep a short video of each catch to review here</div></div>
           <label class="switch"><input id="clips_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="toggle">
+          <div><div class="t-label">Show counter items</div><div class="t-desc">Outline food and dishes it sees on the live view</div></div>
+          <label class="switch"><input id="show_inventory_boxes" type="checkbox" /><span class="track"></span></label>
         </div>
         <div class="field">
           <div class="row"><label for="sound_upload">Add a sound</label></div>
@@ -453,6 +460,8 @@ document.getElementById("safety_enabled").addEventListener("change", e => patch(
 document.getElementById("person_suppression_enabled").addEventListener("change", e =>
   patch({person_suppression_enabled:e.target.checked}));
 document.getElementById("clips_enabled").addEventListener("change", e => patch({clips_enabled:e.target.checked}));
+document.getElementById("show_inventory_boxes").addEventListener("change", e =>
+  patch({show_inventory_boxes:e.target.checked}));
 document.getElementById("selected_sound").addEventListener("change", e => patch({selected_sound:e.target.value}));
 
 // ---- Watch-for grid ----
@@ -671,6 +680,11 @@ async function poll(){
   document.getElementById("people").textContent = s.people;
   document.getElementById("conf").textContent = s.confidence ? pct(s.confidence) : "–";
   document.getElementById("fires").textContent = s.fires_this_hour;
+  document.querySelector(".oncounter").style.display = s.settings.inventory_enabled ? "" : "none";
+  const counterItems = (s.on_counter || [])
+    .map(i => i.count > 1 ? i.count + " " + i.label + "s" : i.label);
+  document.getElementById("on_counter").textContent =
+    counterItems.length ? counterItems.join(", ") : "nothing it recognizes";
 
   // System (card + monitor OSD)
   const cooling = s.detect_interval_effective > s.settings.detect_interval_seconds;
@@ -702,6 +716,7 @@ async function poll(){
   }
 
   document.getElementById("clips_enabled").checked = s.settings.clips_enabled;
+  document.getElementById("show_inventory_boxes").checked = s.settings.show_inventory_boxes;
   const selEl = document.getElementById("selected_sound");
   if (document.activeElement !== selEl){
     const want = s.settings.selected_sound || "random";

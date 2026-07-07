@@ -1,7 +1,7 @@
 import numpy as np
 
 from doggy.core.config import TunableSettings
-from doggy.vision.analysis import DetectionAnalyzer, FrameAnalysis
+from doggy.vision.analysis import DetectionAnalyzer, FrameAnalysis, InventoryTracker
 from doggy.vision.detection import Detection
 from doggy.vision.detector import StubDetector
 from doggy.vision.filters.base import FilterChain
@@ -57,6 +57,24 @@ def test_detect_only_class_never_becomes_candidate():
     analysis = analyzer.analyze(np.zeros((100, 100, 3), np.uint8), cfg)
     assert analysis.targets == [bird, dog]   # both drawn
     assert analysis.candidates == [dog]      # only the dog can fire
+
+
+def test_analyzer_collects_inventory_separately():
+    snack = Detection("sandwich", 0.5, (0, 0, 10, 10))
+    dog = Detection("dog", 0.9, (20, 20, 30, 30))
+    analyzer = DetectionAnalyzer(StubDetector([[snack, dog]]), FilterChain([]))
+    analysis = analyzer.analyze(np.zeros((100, 100, 3), np.uint8), TunableSettings())
+    assert analysis.inventory == [snack]
+    assert analysis.targets == [dog]
+
+
+def test_inventory_tracker_debounces_two_of_five():
+    t = InventoryTracker()
+    assert t.update(["cup"]) == []                # seen once: not yet present
+    assert t.update(["cup", "cup"]) == [{"label": "cup", "count": 2}]
+    for _ in range(4):
+        t.update([])                              # gone 4 frames
+    assert t.update([]) == []
 
 
 def test_chain_runs_filters_in_order():

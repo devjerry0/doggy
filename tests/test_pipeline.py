@@ -293,6 +293,31 @@ def test_pipeline_finalizes_clip_after_postroll(tmp_path):
     assert (tmp_path / rec.clip).is_file()       # and the clip file exists on disk
 
 
+def test_pipeline_reports_counter_inventory(tmp_path):
+    # A cup seen twice becomes "on the counter" (2-of-5 debounce); it is
+    # inventory only, so it must never count as a target or fire.
+    settings = Settings()
+    runtime = RuntimeSettings(settings.tunable())
+    cup = [Detection("cup", 0.5, (10, 10, 20, 20))]
+    status = StatusStore()
+    store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
+    pipe = Pipeline(
+        settings=settings, analyzer=_analyzer(StubDetector([cup, cup])),
+        camera=FakeCamera([np.zeros((40, 40, 3), np.uint8)], loop=True),
+        runtime=runtime, status=status,
+        raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        clip_service=clips, clock=lambda: 0.0,
+        rng=random.Random(0),
+    )
+    frame = np.zeros((40, 40, 3), np.uint8)
+    fired = [pipe.run_once(frame) for _ in range(2)]
+    assert not any(fired)
+    assert status.snapshot().on_counter == [{"label": "cup", "count": 1}]
+    assert status.snapshot().targets == 0
+
+
 def test_annotate_draws_zone_polygon():
     from doggy.vision.annotate import annotate
     frame = np.zeros((100, 100, 3), np.uint8)
