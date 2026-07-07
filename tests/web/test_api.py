@@ -59,7 +59,7 @@ def test_save_persists(tmp_path):
 
 
 def test_write_env_preserves_structural_keys(tmp_path):
-    from doggy.web import _write_env
+    from doggy.web.envfile import _write_env
     from doggy.core.config import TunableSettings
     env = tmp_path / ".env"
     env.write_text("DOGGY_CAMERA_INDEX=1\nDOGGY_CONFIDENCE=0.55\n# comment\n")
@@ -93,7 +93,7 @@ def test_events_route_404_for_missing(tmp_path):
 
 
 def test_write_env_roundtrips_zone_points(tmp_path, monkeypatch):
-    from doggy.web import _write_env
+    from doggy.web.envfile import _write_env
     from doggy.core.config import Settings, TunableSettings
     env = tmp_path / ".env"
     env.write_text("DOGGY_CAMERA_INDEX=0\n")
