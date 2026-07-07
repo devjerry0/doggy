@@ -61,6 +61,10 @@ def build_router(settings: Settings, event_store: EventStore) -> APIRouter:
     def api_stats() -> dict:
         return event_store.stats()
 
+    @router.get("/api/lab")
+    def api_lab() -> dict:
+        return event_store.lab_stats()
+
     @router.get("/clips/{name}")
     def clip(name: str) -> FileResponse:
         # Path(name).name strips any directory components → no path traversal.

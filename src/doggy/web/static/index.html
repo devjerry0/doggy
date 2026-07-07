@@ -173,7 +173,7 @@
   .events img{height:48px;width:64px;object-fit:cover;border-radius:5px;
               border:1px solid var(--seam);cursor:pointer;transition:border-color .15s}
   .events img:hover{border-color:var(--lamp)}
-  .events .empty{font-family:var(--serif);font-style:italic;color:var(--stone);font-size:.95rem}
+  .empty{font-family:var(--serif);font-style:italic;color:var(--stone);font-size:.95rem}
   .thumb{position:relative;flex:none;line-height:0;cursor:pointer}
   .playbadge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
              width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);
@@ -200,6 +200,19 @@
   .act-notes{display:flex;flex-direction:column;gap:.2rem}
   .act-note{color:var(--stone);font-size:.82rem}
 
+  /* ---- Deterrence lab ---- */
+  .lab-row{display:flex;align-items:baseline;gap:.7rem;padding:.4rem 0}
+  .lab-row+.lab-row{border-top:1px solid var(--seam)}
+  .lab-sound{flex:1 1 auto;min-width:0;font-size:.9rem;font-weight:550;
+             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lab-num{font-family:var(--mono);font-size:.78rem;color:var(--stone);
+           font-variant-numeric:tabular-nums;white-space:nowrap}
+  .lab-num b{color:var(--linen);font-weight:500}
+  .tag{color:var(--ember);border:1px solid var(--ember);border-radius:4px;
+       padding:0 .35rem;font-size:.65rem}
+  .lab-thefts{color:var(--stone);font-size:.82rem;margin-top:.7rem;padding-top:.6rem;
+              border-top:1px solid var(--seam)}
+
   /* ---- System ---- */
   .sys{display:flex;flex-wrap:wrap;gap:.5rem 1.6rem}
   .sys .k{color:var(--stone);font-size:.78rem}
@@ -220,7 +233,7 @@
             border:1px solid var(--lamp)}
   .lb-bar a:hover{background:var(--lamp-soft);border-color:var(--lamp-soft)}
 
-  /* ---- Mobile: interleave cards (monitor, log, activity, settings, system) ---- */
+  /* ---- Mobile: interleave cards (monitor, log, activity, lab, settings, system) ---- */
   @media(max-width:720px){
     .wrap{padding:.9rem}
     header{margin-bottom:1.1rem}
@@ -229,7 +242,7 @@
     .col-live,.col-side{display:contents}
     .grid .card{min-width:0;width:100%;margin-bottom:0}
     .grid{gap:1rem}
-    .c-mon{order:1}.c-log{order:2}.c-act{order:3}.c-set{order:4}.c-sys{order:5}
+    .c-mon{order:1}.c-log{order:2}.c-act{order:3}.c-lab{order:4}.c-set{order:5}.c-sys{order:6}
     #vidwrap{display:block}
     #live{width:100%;height:auto}
     .readout{grid-template-columns:1fr 1fr;gap:.75rem}
@@ -415,6 +428,11 @@
         </div>
       </div>
 
+      <div class="card c-lab">
+        <h2>Deterrence</h2>
+        <div id="lab_body"><div class="empty">No data yet. Once it reacts a few times, you'll see which sounds actually work.</div></div>
+      </div>
+
       <div class="card c-sys">
         <h2>System</h2>
         <div class="sys">
@@ -445,6 +463,10 @@ const KNOBS = ["confidence","confirm_seconds","window_m","window_n","cooldown_mi
                "person_iou_threshold","max_volume"];
 const pct = v => Math.round(v * 100) + "%";
 const secs = v => (Math.round(v * 10) / 10) + "s";
+// Inventory labels with irregular plurals; anything else just takes an "s".
+const PLURALS = {"sandwich":"sandwiches", "wine glass":"wine glasses",
+                 "knife":"knives", "broccoli":"broccoli"};
+const plural = label => PLURALS[label] || label + "s";
 const FMT = {confidence:pct, person_iou_threshold:pct, max_volume:pct, confirm_seconds:secs,
              cooldown_min_seconds:secs, cooldown_max_seconds:secs, detect_interval_seconds:secs};
 const fmt = (k, v) => (FMT[k] || String)(v);
@@ -527,11 +549,13 @@ function evRow(e){
   const play = e.clip ? '<span class="playbadge"></span>' : "";
   const clipArg = e.clip ? "'/clips/" + e.clip + "'" : "null";
   const lat = e.latency_s != null ? " · reacted in " + secs(e.latency_s) : "";
+  const strikes = e.strikes > 1 ? " · " + e.strikes + " strikes" : "";
+  const took = (e.taken && e.taken.length) ? " · took the " + escapeHtml(e.taken.join(", ")) : "";
   return '<div class="ev">'
     + '<div class="thumb" title="Click to enlarge" onclick="openEvent(\'/events/' + e.thumb + '\', ' + clipArg + ')">'
     + '<img src="/events/' + e.thumb + '" alt="reaction snapshot">' + play + '</div>'
     + '<div class="ev-meta"><div class="ev-time">' + timeLabel(e) + '</div>'
-    + '<div class="ev-sub">' + pct(e.confidence) + ' sure' + lat + '</div></div>'
+    + '<div class="ev-sub">' + pct(e.confidence) + ' sure' + lat + strikes + took + '</div></div>'
     + '<button class="del" title="Delete this reaction" onclick="deleteEvent(\'' + e.id + '\')">×</button>'
     + '</div>';
 }
@@ -601,6 +625,29 @@ function hourLabel(h){
   const ampm = h < 12 ? "am" : "pm";
   let hr = h % 12; if (hr === 0) hr = 12;
   return hr + ampm;
+}
+
+// ---- Deterrence lab ----
+async function refreshLab(){
+  let lab;
+  try { lab = await (await fetch("/api/lab")).json(); } catch(e){ return; }
+  const rows = (lab.sounds || []).map(s => {
+    const name = escapeHtml(s.sound.replace(/\.[^.]+$/, ""));
+    const tag = s.wearing_off ? ' <span class="tag">wearing off</span>' : "";
+    const clear = s.avg_clear_s == null ? "stayed" : secs(s.avg_clear_s);
+    const rate = s.deterred_rate == null ? "–" : pct(s.deterred_rate);
+    return '<div class="lab-row"><span class="lab-sound">' + name + tag + '</span>'
+      + '<span class="lab-num">' + s.plays + (s.plays === 1 ? ' play' : ' plays') + '</span>'
+      + '<span class="lab-num">' + clear + '</span>'
+      + '<span class="lab-num"><b>' + rate + '</b> deterred</span></div>';
+  });
+  let html = rows.join("");
+  if (lab.thefts_this_week > 0){
+    html += '<div class="lab-thefts">' + lab.thefts_this_week
+      + (lab.thefts_this_week === 1 ? " item" : " items") + ' lost this week</div>';
+  }
+  document.getElementById("lab_body").innerHTML = html ||
+    '<div class="empty">No data yet. Once it reacts a few times, you\'ll see which sounds actually work.</div>';
 }
 
 // ---- Sounds ----
@@ -688,7 +735,7 @@ async function poll(){
   document.getElementById("fires").textContent = s.fires_this_hour;
   document.querySelector(".oncounter").style.display = s.settings.inventory_enabled ? "" : "none";
   const counterItems = (s.on_counter || [])
-    .map(i => i.count > 1 ? i.count + " " + i.label + "s" : i.label);
+    .map(i => i.count > 1 ? i.count + " " + plural(i.label) : i.label);
   document.getElementById("on_counter").textContent =
     counterItems.length ? counterItems.join(", ") : "nothing it recognizes";
 
@@ -785,9 +832,9 @@ async function clearZone(){
   await patch({zone_enabled:false, zone_points:[]});
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
-loadSounds(); loadEvents(); refreshStats();
+loadSounds(); loadEvents(); refreshStats(); refreshLab();
 setInterval(poll, 500); poll();
-setInterval(() => { loadEvents(); refreshStats(); }, 4000);
+setInterval(() => { loadEvents(); refreshStats(); refreshLab(); }, 4000);
 </script>
 </body>
 </html>
