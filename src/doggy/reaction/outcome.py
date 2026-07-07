@@ -71,7 +71,12 @@ class OutcomeWatcher:
                             + inc["strikes"] * cfg.escalation_volume_step)
                 if self._alerter.alert(volume=level):
                     self._gate.note_fire(now)
-                    self._store.bump_strikes(inc["id"])
+                    try:
+                        # Best-effort: the in-memory ladder below must advance
+                        # even if the record's counter can't be persisted.
+                        self._store.bump_strikes(inc["id"])
+                    except Exception:
+                        log.exception("failed to record strike for %s", inc["id"])
                     inc["strikes"] += 1
                     inc["last_strike_ts"] = now
             if now - inc["fire_ts"] >= MAX_WATCH_SECONDS:
@@ -83,8 +88,13 @@ class OutcomeWatcher:
             self._finalize(clear_seconds=inc["clear_since"] - inc["fire_ts"])
 
     def _finalize(self, clear_seconds: float | None) -> None:
+        # The incident is cleared before the store write so a failing disk
+        # (this runs on the detect thread) can't wedge the watcher.
         inc, self._incident = self._incident, None
         taken = sorted(inc["before"] - self._tracker.labels())
-        self._store.attach_outcome(
-            inc["id"], clear_seconds=clear_seconds, taken=taken,
-            wall_time=self._clock())
+        try:
+            self._store.attach_outcome(
+                inc["id"], clear_seconds=clear_seconds, taken=taken,
+                wall_time=self._clock())
+        except Exception:
+            log.exception("failed to record outcome for %s", inc["id"])

@@ -36,6 +36,7 @@ src/doggy/
     recorder.py        Recorder: persists a catch via the single-writer EventStore
     sound.py           alerter backends (Template Method) + registry + SoundReaction
     clips.py           ClipBuffer + ClipService (per-frame capture and a catch reaction)
+    outcome.py         OutcomeWatcher: clear-time + theft measurement per catch, drives escalation (per-frame stage + hub reaction, like ClipService)
   events/
     store.py           EventStore/EventRecord: the only writer of events.jsonl + JPEGs
   hardware/            the Pi's physical signals
