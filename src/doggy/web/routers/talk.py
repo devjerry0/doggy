@@ -38,22 +38,41 @@ def build_router() -> APIRouter:
             await ws.accept()
             await ws.close(code=1013)  # try again later: someone is talking
             return
-        proc = _spawn_player()
+        # Everything past here must reach the finally so the lock is released:
+        # spawning inside the try (Popen can fail) and any pipe write failing
+        # (the speaker dropping) must not strand the lock and brick push-to-talk.
+        proc = None
         try:
+            proc = _spawn_player()
             await ws.accept()
             while True:
                 data = await ws.receive_bytes()
                 if proc and proc.stdin:
                     # Blocking write on the event loop: frames are tiny (~8 KB)
                     # and go to a local pipe, so it never meaningfully stalls.
-                    proc.stdin.write(data)
-                    proc.stdin.flush()
+                    try:
+                        proc.stdin.write(data)
+                        proc.stdin.flush()
+                    except OSError:
+                        # The player went away mid-stream (e.g. the Bluetooth
+                        # speaker dropped): end the session, don't propagate.
+                        log.info("push-to-talk: player went away mid-stream")
+                        break
         except WebSocketDisconnect:
             pass
         finally:
-            if proc:
-                proc.stdin.close()
-                proc.terminate()
+            if proc is not None:
+                # close() re-flushes buffered bytes and can itself raise on a
+                # dead pipe; swallow that so terminate() and release() still run.
+                try:
+                    if proc.stdin is not None:
+                        proc.stdin.close()
+                except OSError:
+                    pass
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
             _busy.release()
 
     return router

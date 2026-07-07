@@ -21,6 +21,18 @@ def _client(tmp_path):
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _release_talk_lock():
+    # Safety net: if a handler ever leaks the one-talker lock, free it here so a
+    # single failure can't cascade into every later test getting turned away
+    # with 1013 (someone is talking).
+    yield
+    try:
+        talk._busy.release()
+    except RuntimeError:
+        pass
+
+
 class FakeProc:
     def __init__(self):
         self.stdin = self
@@ -40,6 +52,82 @@ class FakeProc:
 
     def wait(self, timeout=None):
         pass
+
+
+class DyingProc:
+    """A player that dies mid-stream: the first frame lands, then the pipe is
+    broken (the Bluetooth speaker dropped, an expected event on this appliance).
+    close() re-flushes buffered bytes and so ALSO raises, mirroring a real
+    BufferedWriter over a dead pipe."""
+
+    def __init__(self):
+        self.stdin = self
+        self.written = []
+
+    def write(self, b):
+        if self.written:
+            raise BrokenPipeError(32, "Broken pipe")
+        self.written.append(bytes(b))
+
+    def flush(self):
+        pass
+
+    def close(self):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def terminate(self):
+        pass
+
+    def wait(self, timeout=None):
+        pass
+
+
+def test_player_dying_mid_stream_frees_the_lock(tmp_path, monkeypatch):
+    # The speaker drops mid-call: the second frame's write raises BrokenPipeError
+    # and so does the close() in the finally. The handler must end the session
+    # gracefully and, above all, release the one-talker lock so push-to-talk is
+    # not bricked until the next service restart.
+    proc = DyingProc()
+    monkeypatch.setattr(talk, "_spawn_player", lambda: proc)
+    c = _client(tmp_path)
+
+    # TestClient re-raises any exception the handler propagates on context exit,
+    # so a clean exit here proves the handler swallowed the broken pipe rather
+    # than letting BrokenPipeError escape.
+    with c.websocket_connect("/ws/talk") as ws:
+        ws.send_bytes(b"\x01\x02")  # lands
+        ws.send_bytes(b"\x03\x04")  # player is dead: write raises
+    assert proc.written == [b"\x01\x02"]
+
+    # Proof the lock was released: a fresh talker with a working player must be
+    # accepted and served, not turned away with 1013.
+    fresh = FakeProc()
+    monkeypatch.setattr(talk, "_spawn_player", lambda: fresh)
+    with c.websocket_connect("/ws/talk") as ws2:
+        ws2.send_bytes(b"\x05")
+    assert fresh.written == [b"\x05"]
+
+
+def test_spawn_failure_frees_the_lock(tmp_path, monkeypatch):
+    # Spawning the player fails outright (FileNotFoundError race / fork failure).
+    # The lock is acquired before the spawn, so it must still be released.
+    def boom():
+        raise OSError("fork failed")
+
+    monkeypatch.setattr(talk, "_spawn_player", boom)
+    c = _client(tmp_path)
+
+    try:
+        with c.websocket_connect("/ws/talk"):
+            pass
+    except Exception:
+        pass
+
+    fresh = FakeProc()
+    monkeypatch.setattr(talk, "_spawn_player", lambda: fresh)
+    with c.websocket_connect("/ws/talk") as ws2:
+        ws2.send_bytes(b"\x05")
+    assert fresh.written == [b"\x05"]
 
 
 def test_talk_pipes_frames_to_player(tmp_path, monkeypatch):
