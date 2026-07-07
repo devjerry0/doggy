@@ -15,6 +15,7 @@ from doggy.events.store import EventStore
 from doggy.pipeline import Pipeline
 from doggy.decision.gate import FireGate
 from doggy.reaction.hub import ReactionHub, SafeReaction
+from doggy.reaction.clips import ClipBuffer, ClipService
 from doggy.reaction.recorder import Recorder
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import FrameBuffer, StatusStore
@@ -25,8 +26,12 @@ def _analyzer(detector):
         detector, FilterChain([PersonSuppressionFilter(), ZoneInclusionFilter()]))
 
 
-def _hub(alerter):
-    return ReactionHub([SafeReaction(SoundReaction(alerter))])
+def _clips(store, settings, runtime):
+    return ClipService(store, store.dir, ClipBuffer(settings.clip_window_seconds), runtime)
+
+
+def _hub(alerter, clip_service):
+    return ReactionHub([SafeReaction(SoundReaction(alerter)), SafeReaction(clip_service)])
 
 
 def test_pipeline_fires_after_confirmation(tmp_path):
@@ -38,6 +43,7 @@ def test_pipeline_fires_after_confirmation(tmp_path):
     alerter = FakeAlerter()
     clock = iter([0.0, 0.5, 1.0, 1.5])
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         settings=settings,
         analyzer=_analyzer(detector),
@@ -46,8 +52,8 @@ def test_pipeline_fires_after_confirmation(tmp_path):
         status=StatusStore(),
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter),
-        event_store=store,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
+        event_store=store, clip_service=clips,
         clock=lambda: next(clock),
         rng=random.Random(0),
     )
@@ -67,6 +73,7 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
     ]
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         settings=settings,
         analyzer=_analyzer(StubDetector([two_dogs])),
@@ -75,8 +82,8 @@ def test_pipeline_counts_multiple_dogs(tmp_path):
         status=status,
         raw_buffer=FrameBuffer(),
         annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter()),
-        event_store=store,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        event_store=store, clip_service=clips,
         clock=lambda: 0.0,
         rng=random.Random(0),
     )
@@ -98,13 +105,14 @@ def test_pipeline_ignores_dogs_outside_zone(tmp_path):
     outside = [Detection("dog", 0.9, (80, 80, 95, 95))]
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([outside])),
         camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter()),
-        event_store=store, clock=lambda: 0.0,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        event_store=store, clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     fired = pipe.run_once(np.zeros((100, 100, 3), np.uint8))
@@ -120,6 +128,7 @@ def test_pipeline_fires_for_dog_inside_zone(tmp_path):
     inside = [Detection("dog", 0.9, (5, 5, 20, 20))]
     alerter = FakeAlerter()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         # TriggerLogic (pre-existing, out of scope here) never fires on the very
         # first sighting -- the IDLE->CONFIRMING transition always returns False
@@ -129,8 +138,8 @@ def test_pipeline_fires_for_dog_inside_zone(tmp_path):
         camera=FakeCamera([np.zeros((100, 100, 3), np.uint8)], loop=True),
         runtime=runtime, status=StatusStore(),
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter),
-        event_store=store, clock=lambda: 0.0,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
+        event_store=store, clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     assert pipe.run_once(np.zeros((100, 100, 3), np.uint8)) is False
@@ -148,14 +157,15 @@ def test_pipeline_records_trigger_confidence_not_empty_fire_frame(tmp_path):
     none: list[Detection] = []
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     clock = iter([0.0, 0.5, 1.0])
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([dog, dog, none])),
         camera=FakeCamera([np.zeros((16, 16, 3), np.uint8)], loop=True),
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter()),
-        event_store=store,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        event_store=store, clip_service=clips,
         clock=lambda: next(clock), rng=random.Random(0),
     )
     frame = np.zeros((16, 16, 3), np.uint8)
@@ -175,13 +185,14 @@ def test_pipeline_suppresses_person_misclassified_as_dog(tmp_path):
             Detection("person", 0.9, (2, 2, 98, 178))]
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([both, both])),
         camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter()),
-        event_store=store, clock=lambda: 0.0,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        event_store=store, clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)
@@ -203,13 +214,14 @@ def test_pipeline_real_dog_near_person_still_fires(tmp_path):
     alerter = FakeAlerter()
     status = StatusStore()
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([both, both])),
         camera=FakeCamera([np.zeros((200, 200, 3), np.uint8)], loop=True),
         runtime=runtime, status=status,
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter),
-        event_store=store, clock=lambda: 0.0,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(alerter, clips),
+        event_store=store, clip_service=clips, clock=lambda: 0.0,
         rng=random.Random(0),
     )
     frame = np.zeros((200, 200, 3), np.uint8)
@@ -231,14 +243,15 @@ def test_pipeline_finalizes_clip_after_postroll(tmp_path):
     runtime = RuntimeSettings(settings.tunable())
     dog = [Detection("dog", 0.9, (0, 0, 10, 10))]
     store = EventStore(tmp_path, 10, 0)
+    clips = _clips(store, settings, runtime)
     clock = iter([0.0, 1.0, 2.0])
     pipe = Pipeline(
         settings=settings, analyzer=_analyzer(StubDetector([dog, dog, dog])),
         camera=FakeCamera([np.zeros((16, 16, 3), np.uint8)], loop=True),
         runtime=runtime, status=StatusStore(),
         raw_buffer=FrameBuffer(), annotated_buffer=FrameBuffer(),
-        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter()),
-        event_store=store,
+        gate=FireGate(runtime), recorder=Recorder(store), hub=_hub(FakeAlerter(), clips),
+        event_store=store, clip_service=clips,
         clock=lambda: next(clock), rng=random.Random(0),
     )
     frame = np.zeros((16, 16, 3), np.uint8)

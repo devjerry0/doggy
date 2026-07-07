@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from doggy.clips import ClipBuffer, encode_clip
+from doggy.reaction.clips import ClipBuffer, encode_clip
 from doggy.events.store import EventStore
 
 

@@ -9,6 +9,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from doggy.core.config import TunableSettings
+from doggy.core.runtime import RuntimeSettings
+from doggy.events.store import EventStore
+from doggy.reaction.hub import DogCaught
+
 log = logging.getLogger("doggy")
 
 
@@ -79,3 +84,57 @@ def encode_clip(frames: list[bytes], fps: int, out_path: Path) -> Path:
         duration=int(1000 / fps),
     )
     return webp_path
+
+
+class ClipService:
+    """Per-frame bufferer + pending-clip finalizer + Reaction on catches.
+
+    Owns the rolling in-memory JPEG buffer and the deferred-encode bookkeeping
+    that used to live in the pipeline. As a per-frame stage it buffers annotated
+    frames; as a hub ``Reaction`` it registers a pending clip on each catch; and
+    ``finalize_due`` cuts + encodes clips once their post-roll has elapsed.
+    """
+
+    def __init__(self, store: EventStore, event_dir: Path, buffer: ClipBuffer,
+                 runtime: RuntimeSettings) -> None:
+        self._store = store
+        self._event_dir = event_dir
+        self._buffer = buffer
+        # ``runtime`` supplies the clips-enabled decision at the fire moment,
+        # exactly where the pipeline read cfg on the fire frame.
+        self._runtime = runtime
+        self._pending: list[dict] = []
+
+    def on_frame(self, annotated: np.ndarray, now: float, cfg: TunableSettings) -> None:
+        if cfg.clips_enabled:
+            # Buffer the ANNOTATED frame so any resulting clip shows the boxes.
+            ok, buf = cv2.imencode(".jpg", annotated)
+            if ok:
+                self._buffer.push(now, buf.tobytes())
+
+    def on_dog_caught(self, event: DogCaught) -> None:
+        cfg = self._runtime.get()
+        if cfg.clips_enabled:
+            # Defer encoding until post-roll has elapsed so the clip captures
+            # a few seconds after the catch as well as the pre-roll.
+            self._pending.append(
+                {"id": event.record.id, "fire_ts": event.mono_ts,
+                 "end": event.mono_ts + cfg.clip_postroll_seconds})
+
+    def finalize_due(self, now: float, cfg: TunableSettings) -> None:
+        """Encode any pending clips whose post-roll window has elapsed."""
+        if not self._pending:
+            return
+        still_pending = []
+        for p in self._pending:
+            if p["end"] > now:
+                still_pending.append(p)
+                continue
+            frames = self._buffer.slice(p["fire_ts"] - cfg.clip_preroll_seconds, p["end"])
+            if frames:
+                try:
+                    path = encode_clip(frames, cfg.clip_fps, self._event_dir / f"{p['id']}.mp4")
+                    self._store.attach_clip(p["id"], path.name)
+                except Exception:
+                    log.exception("failed to encode clip for %s", p["id"])
+        self._pending = still_pending
