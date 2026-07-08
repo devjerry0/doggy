@@ -115,6 +115,10 @@ class TunableSettings(BaseModel):
     # same trick the label fields use for their comma form).
     schedule_enabled: bool = False
     armed_windows: Annotated[tuple[ArmedWindow, ...], NoDecode] = ()
+    # Weekly schedule for the soothing loop, independent of the arming schedule:
+    # when on, soothing music only plays inside soothing_windows.
+    soothing_schedule_enabled: bool = False
+    soothing_windows: Annotated[tuple[ArmedWindow, ...], NoDecode] = ()
 
     # Mirrors doggy.vision.detection.ANIMAL_TARGETS (importing it would create
     # a core -> vision cycle).
@@ -138,7 +142,7 @@ class TunableSettings(BaseModel):
             raise ValueError(f"unknown watch classes: {unknown}")
         return labels
 
-    @field_validator("armed_windows", mode="before")
+    @field_validator("armed_windows", "soothing_windows", mode="before")
     @classmethod
     def _parse_windows(cls, v):
         # NoDecode hands the raw .env string here; other callers pass a list of

@@ -53,12 +53,21 @@ def _seconds_to_flip(windows: tuple[ArmedWindow, ...], dt: datetime, armed: bool
     return (best - dt).total_seconds()
 
 
+def within_windows(windows: tuple[ArmedWindow, ...], wall_now: float) -> bool:
+    """True if any weekly window covers this moment (wall-clock, local time).
+    Empty windows -> False; each caller decides what "no windows" means."""
+    if not windows:
+        return False
+    dt = datetime.fromtimestamp(wall_now)
+    return any(_window_active(w, dt) for w in windows)
+
+
 def armed_state(cfg: TunableSettings, wall_now: float) -> tuple[bool, float | None]:
     """Whether the appliance should react right now, and the seconds until that
     changes. When the schedule is off (or has no windows) it is always armed and
     there is no countdown."""
     if not cfg.schedule_enabled or not cfg.armed_windows:
         return True, None
+    armed = within_windows(cfg.armed_windows, wall_now)
     dt = datetime.fromtimestamp(wall_now)
-    armed = any(_window_active(w, dt) for w in cfg.armed_windows)
     return armed, _seconds_to_flip(cfg.armed_windows, dt, armed)

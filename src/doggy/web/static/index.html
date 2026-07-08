@@ -492,6 +492,15 @@
           <div class="row"><label>Soothing loudness</label><span class="val" id="soothing_volume_v"></span></div>
           <input id="soothing_volume" type="range" min="0" max="1" step="0.01" />
         </div>
+        <div class="toggle">
+          <div><div class="t-label">On a schedule</div><div class="t-desc">Only play soothing sounds during the times you pick.</div></div>
+          <label class="switch"><input id="soothing_schedule_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="field" id="soothing_schedule_editor" style="display:none">
+          <div class="desc">Pick the days and hours the soothing loop should play.</div>
+          <div id="soothing_windows_box"></div>
+          <div class="btnrow"><button onclick="addSoothingWindow()">Add times</button></div>
+        </div>
         <div id="soothing_list"></div>
         <div class="desc" id="soothing_usage"></div>
         <div class="field">
@@ -578,77 +587,77 @@ document.getElementById("schedule_enabled").addEventListener("change", e => {
   patch({schedule_enabled:e.target.checked});
   document.getElementById("schedule_editor").style.display = e.target.checked ? "" : "none";
 });
+document.getElementById("soothing_schedule_enabled").addEventListener("change", e => {
+  patch({soothing_schedule_enabled:e.target.checked});
+  document.getElementById("soothing_schedule_editor").style.display = e.target.checked ? "" : "none";
+});
 
 // ---- Arming schedule editor ----
-// windowsData mirrors the server's armed_windows; every change patches the whole
-// array. All timing is the server's job (see armed_state) -- this only edits days
-// and "HH:MM" strings.
+// A weekly-window editor bound to one settings array (armed_windows or
+// soothing_windows). Every change patches the whole array; all timing is the
+// server's job -- this only edits days and "HH:MM" strings. Two instances share
+// this factory so the arming and soothing schedules stay identical.
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
-const winBox = document.getElementById("windows");
-let windowsData = [];
-let _winKey = null;         // JSON of the last server state we rendered
-let windowsTouchedAt = 0;   // pause server-sync briefly after a local edit
-function renderWindows(){
-  if (!windowsData.length){
-    winBox.innerHTML = '<div class="win-empty">No times yet. Add times to choose when it reacts.</div>';
-    return;
+function makeScheduleEditor(boxId, patchKey, emptyText){
+  const box = document.getElementById(boxId);
+  let data = [];
+  let key = null;            // JSON of the last server state we rendered
+  let touchedAt = 0;         // pause server-sync briefly after a local edit
+  function render(){
+    if (!data.length){ box.innerHTML = '<div class="win-empty">' + emptyText + '</div>'; return; }
+    box.innerHTML = data.map((w, i) => {
+      const chips = DAY_LETTERS.map((ltr, d) =>
+        '<button type="button" class="chip' + (w.days.includes(d) ? ' on' : '')
+        + '" data-idx="' + i + '" data-day="' + d + '">' + ltr + '</button>').join("");
+      return '<div class="win-row">'
+        + '<div class="daychips">' + chips + '</div>'
+        + '<div class="win-times">'
+        + '<input type="time" data-idx="' + i + '" data-edge="start" value="' + w.start + '">'
+        + '<span class="win-sep">to</span>'
+        + '<input type="time" data-idx="' + i + '" data-edge="end" value="' + w.end + '">'
+        + '<button type="button" class="linkbtn" data-idx="' + i + '" data-remove="1">Remove</button>'
+        + '</div></div>';
+    }).join("");
   }
-  winBox.innerHTML = windowsData.map((w, i) => {
-    const chips = DAY_LETTERS.map((ltr, d) =>
-      '<button type="button" class="chip' + (w.days.includes(d) ? ' on' : '')
-      + '" data-idx="' + i + '" data-day="' + d + '">' + ltr + '</button>').join("");
-    return '<div class="win-row">'
-      + '<div class="daychips">' + chips + '</div>'
-      + '<div class="win-times">'
-      + '<input type="time" data-idx="' + i + '" data-edge="start" value="' + w.start + '">'
-      + '<span class="win-sep">to</span>'
-      + '<input type="time" data-idx="' + i + '" data-edge="end" value="' + w.end + '">'
-      + '<button type="button" class="linkbtn" data-idx="' + i + '" data-remove="1">Remove</button>'
-      + '</div></div>';
-  }).join("");
+  function push(){ touchedAt = Date.now(); key = null; patch({[patchKey]: data}); }
+  box.addEventListener("click", e => {
+    const chip = e.target.closest(".chip");
+    if (chip){
+      const w = data[+chip.dataset.idx], d = +chip.dataset.day;
+      const at = w.days.indexOf(d);
+      if (at >= 0){ w.days.splice(at, 1); } else { w.days.push(d); w.days.sort((a,b)=>a-b); }
+      chip.classList.toggle("on");
+      push();
+      return;
+    }
+    const rm = e.target.closest("[data-remove]");
+    if (rm){ data.splice(+rm.dataset.idx, 1); render(); push(); }
+  });
+  box.addEventListener("change", e => {
+    if (e.target.matches('input[type=time]')){
+      data[+e.target.dataset.idx][e.target.dataset.edge] = e.target.value;
+      push();
+    }
+  });
+  return {
+    add(){ data.push({days:[0,1,2,3,4], start:"21:00", end:"07:00"}); render(); push(); },
+    sync(serverWindows){
+      if (Date.now() - touchedAt < 1500) return;         // user is mid-edit
+      if (box.contains(document.activeElement)) return;
+      const k = JSON.stringify(serverWindows);
+      if (k === key) return;                              // unchanged since last render
+      key = k;
+      data = serverWindows.map(w => ({days:[...w.days], start:w.start, end:w.end}));
+      render();
+    },
+  };
 }
-function pushWindows(){
-  windowsTouchedAt = Date.now();
-  _winKey = null;            // force a resync (and revert) if the server rejects it
-  patch({armed_windows: windowsData});
-}
-function addWindow(){
-  windowsData.push({days:[0,1,2,3,4], start:"21:00", end:"07:00"});
-  renderWindows();
-  pushWindows();
-}
-winBox.addEventListener("click", e => {
-  const chip = e.target.closest(".chip");
-  if (chip){
-    const w = windowsData[+chip.dataset.idx], d = +chip.dataset.day;
-    const at = w.days.indexOf(d);
-    if (at >= 0){ w.days.splice(at, 1); } else { w.days.push(d); w.days.sort((a,b)=>a-b); }
-    chip.classList.toggle("on");
-    pushWindows();
-    return;
-  }
-  const rm = e.target.closest("[data-remove]");
-  if (rm){
-    windowsData.splice(+rm.dataset.idx, 1);
-    renderWindows();
-    pushWindows();
-  }
-});
-winBox.addEventListener("change", e => {
-  if (e.target.matches('input[type=time]')){
-    windowsData[+e.target.dataset.idx][e.target.dataset.edge] = e.target.value;
-    pushWindows();
-  }
-});
-function syncWindows(serverWindows){
-  if (Date.now() - windowsTouchedAt < 1500) return;   // user is mid-edit
-  if (winBox.contains(document.activeElement)) return;
-  const key = JSON.stringify(serverWindows);
-  if (key === _winKey) return;                         // unchanged since last render
-  _winKey = key;
-  windowsData = serverWindows.map(w => ({days:[...w.days], start:w.start, end:w.end}));
-  renderWindows();
-}
+const armedEditor = makeScheduleEditor("windows", "armed_windows",
+  "No times yet. Add times to choose when it reacts.");
+const soothingEditor = makeScheduleEditor("soothing_windows_box", "soothing_windows",
+  "No times yet. Add times to choose when soothing plays.");
+function addWindow(){ armedEditor.add(); }
+function addSoothingWindow(){ soothingEditor.add(); }
 
 // ---- Watch-for grid ----
 function targetNoun(labels, plural){
@@ -1080,7 +1089,10 @@ async function poll(){
   }
   document.getElementById("schedule_enabled").checked = s.settings.schedule_enabled;
   document.getElementById("schedule_editor").style.display = s.settings.schedule_enabled ? "" : "none";
-  syncWindows(s.settings.armed_windows || []);
+  armedEditor.sync(s.settings.armed_windows || []);
+  document.getElementById("soothing_schedule_enabled").checked = s.settings.soothing_schedule_enabled;
+  document.getElementById("soothing_schedule_editor").style.display = s.settings.soothing_schedule_enabled ? "" : "none";
+  soothingEditor.sync(s.settings.soothing_windows || []);
   const selEl = document.getElementById("selected_sound");
   if (document.activeElement !== selEl){
     const want = s.settings.selected_sound || "random";

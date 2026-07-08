@@ -102,13 +102,14 @@ def running(player):
 
 
 def _player(tmp_path, spawn, rt=None, status=None, clock=time.monotonic, poll=0.02,
-            set_volume=None):
+            set_volume=None, wall_clock=time.time):
     # Default set_volume is a no-op returning False (no live apply, no real
     # subprocess to pw-dump/wpctl): keeps tests fast and host-independent, and
     # exercises the re-spawn fallback. Live-volume tests pass their own.
     p = SoothingPlayer(rt or _runtime(enabled=True), tmp_path,
                        status or StatusStore(), clock=clock, spawn=spawn,
-                       set_volume=set_volume or (lambda proc, v: False))
+                       set_volume=set_volume or (lambda proc, v: False),
+                       wall_clock=wall_clock)
     p._poll = poll
     return p
 
@@ -223,6 +224,40 @@ def test_volume_change_restarts_when_live_apply_unavailable(tmp_path):
         assert first.terminated
         assert spawn.calls[1][0].name == "a.mp3"  # same track, not advanced to b
         assert spawn.calls[1][1] == 0.1
+
+
+def test_soothing_schedule_gates_playback(tmp_path):
+    # Monday 2026-07-06 is a Monday; a window Mon 09:00-17:00. At noon it plays;
+    # outside the window it does not spawn at all.
+    from datetime import datetime
+    _tracks(tmp_path, "a.mp3")
+    win = {"days": [0], "start": "09:00", "end": "17:00"}
+    rt = _runtime(enabled=True, soothing_schedule_enabled=True, soothing_windows=[win])
+    inside = datetime(2026, 7, 6, 12, 0).timestamp()
+    outside = datetime(2026, 7, 6, 20, 0).timestamp()
+
+    spawn = FakeSpawn(lambda p, v: FakeProc(autofinish=False))
+    with running(_player(tmp_path, spawn, rt=rt, wall_clock=lambda: outside)):
+        time.sleep(0.1)
+        assert spawn.calls == []  # off-schedule: never spawns
+
+    spawn2 = FakeSpawn(lambda p, v: FakeProc(autofinish=False))
+    with running(_player(tmp_path, spawn2, rt=rt, wall_clock=lambda: inside)):
+        _wait_for(lambda: len(spawn2.calls) == 1)  # in-window: plays
+
+
+def test_soothing_schedule_window_close_stops_current_track(tmp_path):
+    from datetime import datetime
+    _tracks(tmp_path, "a.mp3")
+    win = {"days": [0], "start": "09:00", "end": "17:00"}
+    rt = _runtime(enabled=True, soothing_schedule_enabled=True, soothing_windows=[win])
+    now = {"t": datetime(2026, 7, 6, 12, 0).timestamp()}  # inside
+    spawn = FakeSpawn(lambda p, v: FakeProc(autofinish=False))
+    with running(_player(tmp_path, spawn, rt=rt, wall_clock=lambda: now["t"])):
+        _wait_for(lambda: len(spawn.calls) == 1)
+        proc = spawn.procs[0]
+        now["t"] = datetime(2026, 7, 6, 20, 0).timestamp()  # window closes
+        _wait_for(lambda: proc.terminated)
 
 
 def test_toggle_off_terminates_current_track(tmp_path):

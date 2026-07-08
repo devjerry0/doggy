@@ -12,6 +12,7 @@ from typing import Callable
 
 from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import StatusStore
+from doggy.decision.schedule import within_windows
 from doggy.reaction.hub import DogCaught
 
 log = logging.getLogger("doggy")
@@ -55,11 +56,14 @@ class SoothingPlayer:
     def __init__(self, runtime: RuntimeSettings, library_dir: Path,
                  status: StatusStore, clock: Callable[[], float] = time.monotonic,
                  spawn: Spawn | None = None,
-                 set_volume: SetVolume | None = None) -> None:
+                 set_volume: SetVolume | None = None,
+                 wall_clock: Callable[[], float] = time.time) -> None:
         self._runtime = runtime
         self._library_dir = Path(library_dir)
         self._status = status
         self._clock = clock
+        # Wall clock (not the monotonic `clock`) for the weekly schedule check.
+        self._wall_clock = wall_clock
         self._spawn = spawn or self._spawn_player
         # Apply a live volume change to the running stream (True = applied, no
         # restart); default uses PipeWire, falls back to a re-spawn where absent.
@@ -117,7 +121,7 @@ class SoothingPlayer:
         fails_this_pass = 0
         while not self._stop.is_set():
             cfg = self._runtime.get()
-            if not cfg.soothing_enabled or self._is_held():
+            if not cfg.soothing_enabled or not self._scheduled_on(cfg) or self._is_held():
                 self._set_track(None)
                 fails_this_pass = 0
                 self._idle()
@@ -216,7 +220,8 @@ class SoothingPlayer:
             if code is not None:
                 return code
             cfg = self._runtime.get()
-            if self._stop.is_set() or not cfg.soothing_enabled:
+            if self._stop.is_set() or not cfg.soothing_enabled or not self._scheduled_on(cfg):
+                # Mode off, shutting down, or the soothing schedule window closed.
                 proc.terminate()
                 self._wait_slice(proc)  # reap (bounded: one slice)
                 return None
@@ -251,6 +256,13 @@ class SoothingPlayer:
     def _is_held(self) -> bool:
         with self._lock:
             return self._clock() < self._hold_until
+
+    def _scheduled_on(self, cfg) -> bool:
+        """Whether the soothing schedule permits playing now. When the schedule
+        is off, always on; otherwise only inside a soothing window (wall time)."""
+        if not cfg.soothing_schedule_enabled:
+            return True
+        return within_windows(cfg.soothing_windows, self._wall_clock())
 
     def _set_track(self, name: str | None) -> None:
         if name != self._current_track:
