@@ -59,10 +59,64 @@ def test_soothing_upload_over_limit_413_and_cleans_up(tmp_path):
     r = c.post("/api/soothing", files={"file": ("big.wav", payload, "audio/wav")})
     assert r.status_code == 413
     assert r.json() == {"detail": "That would go over the 1 GB limit. Delete a track first."}
-    # partial file cleaned up and library unchanged (nothing landed)
-    assert not (soothing / ".upload.part").exists()
+    # partial file cleaned up and library unchanged (nothing landed). The temp file is
+    # dot-prefixed, so glob(".upload.*") (pattern starts with a literal dot) is what
+    # actually catches a leftover — glob("*.part") would skip hidden names entirely.
+    assert list(soothing.glob(".upload.*")) == []
     assert list(soothing.glob("*")) == []
     assert c.get("/api/soothing").json()["tracks"] == []
+
+
+def test_soothing_replace_near_limit_ok(tmp_path):
+    # Re-uploading a track that already exists must not count its old bytes twice:
+    # os.replace overwrites it, so the same 600-byte file fits under a 1000-byte cap.
+    c, soothing = _client(tmp_path, limit=1000)
+    payload = b"\x00" * 600
+    assert c.post("/api/soothing",
+                  files={"file": ("calm.wav", payload, "audio/wav")}).status_code == 200
+    r = c.post("/api/soothing", files={"file": ("calm.wav", payload, "audio/wav")})
+    assert r.status_code == 200
+    body = c.get("/api/soothing").json()
+    assert body["tracks"] == [{"name": "calm.wav", "size": 600}]
+    assert body["total_bytes"] == 600
+    assert list(soothing.glob(".upload.*")) == []
+
+
+def test_soothing_over_limit_keeps_existing_tracks(tmp_path):
+    # A rejected upload must leave the pre-existing library completely untouched.
+    c, soothing = _client(tmp_path, limit=1000)
+    soothing.mkdir(parents=True)
+    (soothing / "aaa.wav").write_bytes(b"\x00" * 300)
+    (soothing / "bbb.wav").write_bytes(b"\x00" * 300)
+    r = c.post("/api/soothing",
+               files={"file": ("ccc.wav", b"\x00" * 2048, "audio/wav")})
+    assert r.status_code == 413
+    body = c.get("/api/soothing").json()
+    assert body["tracks"] == [
+        {"name": "aaa.wav", "size": 300},
+        {"name": "bbb.wav", "size": 300},
+    ]
+    assert body["total_bytes"] == 600
+    assert (soothing / "aaa.wav").read_bytes() == b"\x00" * 300
+    assert (soothing / "bbb.wav").read_bytes() == b"\x00" * 300
+    assert list(soothing.glob(".upload.*")) == []
+
+
+def test_soothing_oversize_content_length_rejected_early(tmp_path):
+    # A body far bigger than the remaining cap trips the Content-Length precheck
+    # (TestClient sets Content-Length from the body). A pre-existing track survives
+    # and no part file is written.
+    c, soothing = _client(tmp_path, limit=1000)
+    soothing.mkdir(parents=True)
+    (soothing / "seed.wav").write_bytes(b"\x00" * 200)
+    r = c.post("/api/soothing",
+               files={"file": ("big.wav", b"\x00" * 20000, "audio/wav")})
+    assert r.status_code == 413
+    assert r.json() == {"detail": "That would go over the 1 GB limit. Delete a track first."}
+    assert list(soothing.glob(".upload.*")) == []
+    body = c.get("/api/soothing").json()
+    assert body["tracks"] == [{"name": "seed.wav", "size": 200}]
+    assert (soothing / "seed.wav").read_bytes() == b"\x00" * 200
 
 
 def test_soothing_upload_rejects_bad_extension(tmp_path):
