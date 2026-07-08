@@ -111,3 +111,44 @@ def test_thermal_target_must_be_le_max():
     from doggy.core.config import TunableSettings
     with pytest.raises(ValidationError):
         TunableSettings(thermal_target_c=90.0, thermal_max_c=80.0)
+
+
+def test_schedule_defaults_disabled():
+    from doggy.core.config import Settings
+    s = Settings()
+    assert s.schedule_enabled is False
+    assert s.armed_windows == ()
+
+
+def test_armed_windows_parsed_from_env(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DOGGY_SCHEDULE_ENABLED", "true")
+    monkeypatch.setenv(
+        "DOGGY_ARMED_WINDOWS",
+        '[{"days": [0, 1, 2, 3, 4], "start": "21:00", "end": "07:00"}]',
+    )
+    s = load_settings()
+    assert s.schedule_enabled is True
+    assert len(s.armed_windows) == 1
+    w = s.armed_windows[0]
+    assert w.days == (0, 1, 2, 3, 4)
+    assert w.start == "21:00" and w.end == "07:00"
+
+
+def test_armed_windows_env_round_trip(monkeypatch, tmp_path):
+    # write_env serializes armed_windows to JSON; a fresh Settings must read it back.
+    from doggy.core.config import TunableSettings
+    from doggy.web.envfile import write_env
+
+    monkeypatch.chdir(tmp_path)
+    tunable = TunableSettings(
+        schedule_enabled=True,
+        armed_windows=[
+            {"days": [0, 1, 2, 3, 4], "start": "21:00", "end": "07:00"},
+            {"days": [5, 6], "start": "09:00", "end": "17:00"},
+        ],
+    )
+    write_env(tunable, tmp_path / ".env")
+    reloaded = load_settings()
+    assert reloaded.schedule_enabled is True
+    assert reloaded.armed_windows == tunable.armed_windows

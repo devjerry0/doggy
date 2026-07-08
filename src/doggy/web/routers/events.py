@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import time
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi import status as http_status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from doggy.core.config import Settings
 from doggy.events.store import EventRecord, EventStore
@@ -56,6 +58,26 @@ def build_router(settings: Settings, event_store: EventStore) -> APIRouter:
     def api_clear_events() -> dict:
         event_store.clear()
         return {"ok": True}
+
+    @router.get("/api/export")
+    def api_export() -> Response:
+        # Buffer the whole zip in RAM: media is already compressed (ZIP_STORED),
+        # so this is tens of MB at worst -- fine on the Pi, no streaming needed.
+        records = event_store.list()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            jsonl = Path(settings.event_log_dir) / "events.jsonl"
+            if jsonl.is_file():
+                z.write(jsonl, "events.jsonl")
+            # No lock is held while reading files: a record whose thumb/clip was
+            # concurrently deleted (delete/prune) fails is_file and is skipped.
+            for r in records:
+                for name in (r.thumb, r.clip):
+                    p = Path(settings.event_log_dir) / name if name else None
+                    if p and p.is_file():
+                        z.write(p, name)
+        return Response(buf.getvalue(), media_type="application/zip", headers={
+            "Content-Disposition": "attachment; filename=watchdoggy-export.zip"})
 
     @router.get("/api/stats")
     def api_stats() -> dict:

@@ -15,6 +15,7 @@ from doggy.vision.analysis import DetectionAnalyzer, InventoryTracker
 from doggy.core.pacer import Pacer
 from doggy.hardware.power import PowerMonitor
 from doggy.decision.gate import FireGate
+from doggy.decision.schedule import armed_state
 from doggy.reaction.hub import DogCaught, ReactionHub
 from doggy.reaction.outcome import OutcomeWatcher
 from doggy.reaction.recorder import Recorder
@@ -125,10 +126,12 @@ class Pipeline:
             temp = self.governor.read_temp_c()
             interval = self.governor.effective_interval(temp, cfg)
             power = self.power.read()
+            armed, next_change = armed_state(cfg, time.time())
             self.status.update(
                 temp_c=temp, detect_interval_effective=interval,
                 undervolt_now=power.undervolt_now if power else None,
                 undervolt_since_boot=power.undervolt_since_boot if power else None,
+                armed=armed, next_change_seconds=next_change,
             )
             self.pacer.wait(interval)
             self.run_once(frame)

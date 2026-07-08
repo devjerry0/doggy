@@ -30,7 +30,8 @@ src/doggy/
       zone.py          keep only candidates inside the drawn watch area
   decision/            decide: is this a fire, and is a fire allowed right now
     trigger.py         TriggerLogic FSM: M-of-N window + confirm timer + jittered cooldown
-    gate.py            FireGate: master switch, snooze, per-hour cap
+    gate.py            FireGate: master switch, arming schedule, snooze, per-hour cap
+    schedule.py        armed_state: pure weekly-window math (wall time, overnight wrap)
   reaction/            react: what happens on a confirmed catch
     hub.py             DogCaught event + Reaction protocol + ReactionHub + SafeReaction
     recorder.py        Recorder: persists a catch via the single-writer EventStore
@@ -43,9 +44,10 @@ src/doggy/
     thermal.py         ThermalGovernor: CPU temperature -> detect interval
     power.py           PowerMonitor: cached under-voltage flags from vcgencmd
   web/                 the LAN dashboard (FastAPI)
-    app.py             create_app + serve + GET /
+    app.py             create_app + serve (plain http, or https + onboarding door) + GET /
+    door.py            onboarding door on plain http: trust-probes the https side, serves the home CA
     envfile.py         in-place .env writer for settings saved from the dashboard
-    routers/           one router per endpoint group: status, settings, events, sounds, snooze
+    routers/           one router per endpoint group: status, settings, events, sounds, snooze, talk
     static/index.html  the single-page dashboard
 ```
 

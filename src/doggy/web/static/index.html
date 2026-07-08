@@ -71,6 +71,8 @@
   body[data-state="state-spotted"] #vidwrap{border-color:var(--ember);
            box-shadow:0 0 0 3px rgba(228,87,46,.28)}
   #live{max-width:100%;display:block}
+  #vidwrap:fullscreen{border:none;border-radius:0}
+  #vidwrap:fullscreen #live{width:100%;height:100%;object-fit:contain}
   #zonecanvas{position:absolute;left:0;top:0;cursor:crosshair;touch-action:manipulation}
   .scrim{position:absolute;left:0;right:0;height:52px;pointer-events:none;z-index:2}
   .scrim.top{top:0;background:linear-gradient(rgba(0,0,0,.45),transparent)}
@@ -105,7 +107,11 @@
   button:hover{border-color:var(--lamp);color:var(--lamp-soft)}
   button.primary{background:var(--lamp);border-color:var(--lamp);color:#1a130a}
   button.primary:hover{background:var(--lamp-soft);border-color:var(--lamp-soft);color:#1a130a}
-  .linkbtn{flex:0 0 auto;padding:.35rem .6rem;font-size:.78rem;color:var(--stone)}
+  #ptt{touch-action:none}
+  #ptt.talking{border-color:var(--lamp);color:var(--lamp-soft);box-shadow:0 0 0 1px var(--lamp) inset}
+  .linkbtn{display:inline-flex;align-items:center;flex:0 0 auto;font:inherit;font-weight:600;
+           font-size:.78rem;padding:.35rem .6rem;border:1px solid var(--seam);border-radius:8px;
+           background:transparent;color:var(--stone);cursor:pointer;text-decoration:none}
   .linkbtn:hover{color:var(--ember);border-color:var(--ember)}
 
   /* ---- Fields ---- */
@@ -144,6 +150,20 @@
   .watchgrid input{accent-color:var(--lamp);width:17px;height:17px;margin:0;
              justify-self:center;cursor:pointer}
   .watchgrid input:disabled{opacity:.3;cursor:default}
+
+  /* ---- Arming schedule editor ---- */
+  .win-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;
+           padding:.7rem 0;border-top:1px solid var(--seam)}
+  .daychips{display:flex;gap:.25rem;flex:1 1 auto}
+  .chip{padding:.32rem 0;width:1.9rem;text-align:center;font-family:var(--mono);
+        font-size:.72rem;border-radius:6px;border:1px solid var(--seam);
+        background:var(--panel2);color:var(--stone);cursor:pointer}
+  .chip.on{background:var(--lamp);border-color:var(--lamp);color:#1a130a}
+  .win-times{display:flex;align-items:center;gap:.4rem}
+  .win-row input[type=time]{font:inherit;font-size:.85rem;padding:.4rem .5rem;border-radius:7px;
+        border:1px solid var(--seam);background:var(--panel2);color:var(--linen)}
+  .win-sep{color:var(--stone);font-size:.82rem}
+  .win-empty{color:var(--stone);font-size:.82rem;padding:.6rem 0}
 
   details{border-top:1px solid var(--seam);margin-top:.4rem}
   details summary{cursor:pointer;list-style:none;padding:.9rem 0 .3rem;color:var(--stone);
@@ -284,6 +304,8 @@
           <div class="btnrow">
             <button onclick="finishZone()">Save area</button>
             <button onclick="clearZone()">Clear area</button>
+            <button id="ptt">Hold to talk</button>
+            <button id="fullscreen_btn" onclick="goFullscreen()">Fullscreen</button>
           </div>
           <div class="readout">
             <div class="stat"><div class="k" id="lbl_inview">Dogs in view</div><div class="v" id="dogs">–</div></div>
@@ -314,6 +336,15 @@
           <div><div class="t-label">Ignore people</div><div class="t-desc">Don't react to a person mistaken for a dog</div></div>
           <label class="switch"><input id="person_suppression_enabled" type="checkbox" /><span class="track"></span></label>
         </div>
+        <div class="toggle">
+          <div><div class="t-label">On a schedule</div><div class="t-desc">Only react during the times you pick. It keeps watching around the clock either way.</div></div>
+          <label class="switch"><input id="schedule_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="field" id="schedule_editor" style="display:none">
+          <div class="desc">Pick the days and hours it should react. Outside these it's off duty but still watching.</div>
+          <div id="windows"></div>
+          <div class="btnrow"><button onclick="addWindow()">Add times</button></div>
+        </div>
 
         <div class="field">
           <div class="row"><label>Watch for</label></div>
@@ -336,6 +367,11 @@
           <div class="row"><label id="lbl_confidence">How sure it must be it's a dog</label><span class="val" id="confidence_v"></span></div>
           <div class="desc">Higher means fewer false alarms, but it may miss a quick visit.</div>
           <input id="confidence" type="range" min="0" max="1" step="0.01" />
+        </div>
+        <div class="field">
+          <div class="row"><label>How much of the animal must be inside the area</label><span class="val" id="zone_overlap_v"></span></div>
+          <div class="desc">Stops a box that only scrapes the edge from setting it off.</div>
+          <input id="zone_overlap" type="range" min="0" max="1" step="0.05" />
         </div>
         <div class="field">
           <div class="row"><label>How long the dog must stay before reacting</label><span class="val" id="confirm_seconds_v"></span></div>
@@ -366,6 +402,10 @@
         <div class="toggle">
           <div><div class="t-label">Save video clips</div><div class="t-desc">Keep a short video of each catch to review here</div></div>
           <label class="switch"><input id="clips_enabled" type="checkbox" /><span class="track"></span></label>
+        </div>
+        <div class="toggle">
+          <div><div class="t-label">Notify this device</div><div class="t-desc" id="notify_desc">Pops a notification on this device when something is caught. Works while the dashboard is open.</div></div>
+          <label class="switch"><input id="notify_enabled" type="checkbox" /><span class="track"></span></label>
         </div>
         <div class="toggle">
           <div><div class="t-label">Show counter items</div><div class="t-desc">Outline food and dishes it sees on the live view</div></div>
@@ -413,7 +453,10 @@
       <div class="card c-log">
         <div class="card-head">
           <h2>Catch log</h2>
-          <button class="linkbtn" onclick="clearEvents()">Clear all</button>
+          <div>
+            <a class="linkbtn" href="/api/export" download>Export all</a>
+            <button class="linkbtn" onclick="clearEvents()">Clear all</button>
+          </div>
         </div>
         <div class="events" id="events"></div>
       </div>
@@ -459,7 +502,7 @@
 </div>
 
 <script>
-const KNOBS = ["confidence","confirm_seconds","window_m","window_n","cooldown_min_seconds",
+const KNOBS = ["confidence","zone_overlap","confirm_seconds","window_m","window_n","cooldown_min_seconds",
                "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds",
                "person_iou_threshold","max_volume"];
 const pct = v => Math.round(v * 100) + "%";
@@ -468,7 +511,7 @@ const secs = v => (Math.round(v * 10) / 10) + "s";
 const PLURALS = {"sandwich":"sandwiches", "wine glass":"wine glasses",
                  "knife":"knives", "broccoli":"broccoli"};
 const plural = label => PLURALS[label] || label + "s";
-const FMT = {confidence:pct, person_iou_threshold:pct, max_volume:pct, confirm_seconds:secs,
+const FMT = {confidence:pct, zone_overlap:pct, person_iou_threshold:pct, max_volume:pct, confirm_seconds:secs,
              cooldown_min_seconds:secs, cooldown_max_seconds:secs, detect_interval_seconds:secs};
 const fmt = (k, v) => (FMT[k] || String)(v);
 const STATE = {IDLE:["Watching","state-watching"], CONFIRMING:["Dog spotted","state-spotted"],
@@ -478,10 +521,22 @@ async function patch(body){
   await fetch("/api/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)});
 }
+// Focus is the wrong "user is touching this" signal on iOS (touch never
+// focuses a range input), so poll() would fight a drag in real time and a
+// just-released PATCH could snap back to a stale in-flight status value.
+// Track last interaction per knob instead and hold the poll off briefly.
+const KNOB_HOLD_MS = 1500;
+const _knobHold = {};
 KNOBS.forEach(k => {
   const el = document.getElementById(k);
-  el.addEventListener("input", () => document.getElementById(k+"_v").textContent = fmt(k, parseFloat(el.value)));
-  el.addEventListener("change", () => patch({[k]: parseFloat(el.value)}));
+  el.addEventListener("input", () => {
+    _knobHold[k] = Date.now();
+    document.getElementById(k+"_v").textContent = fmt(k, parseFloat(el.value));
+  });
+  el.addEventListener("change", () => {
+    _knobHold[k] = Date.now();
+    patch({[k]: parseFloat(el.value)});
+  });
 });
 document.getElementById("safety_enabled").addEventListener("change", e => patch({safety_enabled:e.target.checked}));
 document.getElementById("person_suppression_enabled").addEventListener("change", e =>
@@ -492,6 +547,81 @@ document.getElementById("clips_enabled").addEventListener("change", e => patch({
 document.getElementById("show_inventory_boxes").addEventListener("change", e =>
   patch({show_inventory_boxes:e.target.checked}));
 document.getElementById("selected_sound").addEventListener("change", e => patch({selected_sound:e.target.value}));
+document.getElementById("schedule_enabled").addEventListener("change", e => {
+  patch({schedule_enabled:e.target.checked});
+  document.getElementById("schedule_editor").style.display = e.target.checked ? "" : "none";
+});
+
+// ---- Arming schedule editor ----
+// windowsData mirrors the server's armed_windows; every change patches the whole
+// array. All timing is the server's job (see armed_state) -- this only edits days
+// and "HH:MM" strings.
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+const winBox = document.getElementById("windows");
+let windowsData = [];
+let _winKey = null;         // JSON of the last server state we rendered
+let windowsTouchedAt = 0;   // pause server-sync briefly after a local edit
+function renderWindows(){
+  if (!windowsData.length){
+    winBox.innerHTML = '<div class="win-empty">No times yet. Add times to choose when it reacts.</div>';
+    return;
+  }
+  winBox.innerHTML = windowsData.map((w, i) => {
+    const chips = DAY_LETTERS.map((ltr, d) =>
+      '<button type="button" class="chip' + (w.days.includes(d) ? ' on' : '')
+      + '" data-idx="' + i + '" data-day="' + d + '">' + ltr + '</button>').join("");
+    return '<div class="win-row">'
+      + '<div class="daychips">' + chips + '</div>'
+      + '<div class="win-times">'
+      + '<input type="time" data-idx="' + i + '" data-edge="start" value="' + w.start + '">'
+      + '<span class="win-sep">to</span>'
+      + '<input type="time" data-idx="' + i + '" data-edge="end" value="' + w.end + '">'
+      + '<button type="button" class="linkbtn" data-idx="' + i + '" data-remove="1">Remove</button>'
+      + '</div></div>';
+  }).join("");
+}
+function pushWindows(){
+  windowsTouchedAt = Date.now();
+  _winKey = null;            // force a resync (and revert) if the server rejects it
+  patch({armed_windows: windowsData});
+}
+function addWindow(){
+  windowsData.push({days:[0,1,2,3,4], start:"21:00", end:"07:00"});
+  renderWindows();
+  pushWindows();
+}
+winBox.addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if (chip){
+    const w = windowsData[+chip.dataset.idx], d = +chip.dataset.day;
+    const at = w.days.indexOf(d);
+    if (at >= 0){ w.days.splice(at, 1); } else { w.days.push(d); w.days.sort((a,b)=>a-b); }
+    chip.classList.toggle("on");
+    pushWindows();
+    return;
+  }
+  const rm = e.target.closest("[data-remove]");
+  if (rm){
+    windowsData.splice(+rm.dataset.idx, 1);
+    renderWindows();
+    pushWindows();
+  }
+});
+winBox.addEventListener("change", e => {
+  if (e.target.matches('input[type=time]')){
+    windowsData[+e.target.dataset.idx][e.target.dataset.edge] = e.target.value;
+    pushWindows();
+  }
+});
+function syncWindows(serverWindows){
+  if (Date.now() - windowsTouchedAt < 1500) return;   // user is mid-edit
+  if (winBox.contains(document.activeElement)) return;
+  const key = JSON.stringify(serverWindows);
+  if (key === _winKey) return;                         // unchanged since last render
+  _winKey = key;
+  windowsData = serverWindows.map(w => ({days:[...w.days], start:w.start, end:w.end}));
+  renderWindows();
+}
 
 // ---- Watch-for grid ----
 function targetNoun(labels, plural){
@@ -533,12 +663,72 @@ function tickClock(){
     new Date().toLocaleTimeString([], {hour12:false});
 }
 tickClock(); setInterval(tickClock, 1000);
+
+// ---- Browser notifications ----
+// Per-device consent, so it lives in localStorage (not a server setting): each
+// phone/laptop opts itself in. Only fires while the dashboard tab is open.
+const notifyToggle = document.getElementById("notify_enabled");
+const notifyDesc = document.getElementById("notify_desc");
+const NOTIFY_DESC = notifyDesc.textContent;   // original copy, restored after an error/grant
+let _lastSettings = null;                     // last /api/status settings, for the catch noun
+const notifySupported = () => "Notification" in window;
+const notifyArmed = () => localStorage.doggy_notify === "1"
+  && notifySupported() && Notification.permission === "granted";
+notifyToggle.checked = notifyArmed();
+notifyToggle.addEventListener("change", async () => {
+  if (!notifyToggle.checked){
+    localStorage.removeItem("doggy_notify");
+    notifyDesc.textContent = NOTIFY_DESC;
+    return;
+  }
+  // Notification needs a secure context (the Pi's https address); http can't ask.
+  if (!window.isSecureContext){
+    notifyToggle.checked = false;
+    notifyDesc.textContent = "Needs the https address. Open the secure dashboard for this device first.";
+    return;
+  }
+  let perm = "denied";
+  try { perm = await Notification.requestPermission(); } catch(e){}
+  if (perm === "granted"){
+    localStorage.doggy_notify = "1";
+    notifyDesc.textContent = NOTIFY_DESC;
+  } else {
+    notifyToggle.checked = false;
+    localStorage.removeItem("doggy_notify");
+  }
+});
+function notifyCatch(e){
+  let title = "Something on the counter";
+  if (_lastSettings){
+    const noun = targetNoun(_lastSettings.alert_labels || [], false);
+    title = noun.charAt(0).toUpperCase() + noun.slice(1) + " on the counter";
+  }
+  const body = pct(e.confidence) + " sure"
+    + (e.taken && e.taken.length ? " · took the " + e.taken.join(", ") : "");
+  // Some browsers throw from the constructor in odd states; a failed nudge
+  // must never break the poll loop.
+  try {
+    new Notification(title, {body, icon: "/events/" + e.thumb, tag: "watchdoggy-catch"});
+  } catch(err){}
+}
+
 // ---- Catch log ----
 let _evKey = "";
+let _seenIds = null;   // ids seen on a prior poll; null = not loaded yet (skip the backlog)
 async function loadEvents(){
   let data;
   try { data = await (await fetch("/api/events")).json(); } catch(e){ return; }
-  const evs = data.events || [];
+  const evs = data.events || [];   // event_store.list() is recent-first
+  const ids = new Set(evs.map(e => e.id));
+  if (_seenIds === null){
+    _seenIds = ids;   // first load: record the backlog, never nudge for it
+  } else {
+    // Nudge only for ids never seen before, so deleting the newest can't re-fire
+    // for an event already shown. evs is recent-first, so the first unseen is newest.
+    const fresh = evs.filter(e => !_seenIds.has(e.id));
+    if (fresh.length && notifyArmed()){ notifyCatch(fresh[0]); }
+    _seenIds = ids;
+  }
   const key = evs.map(e => e.id).join(",");   // skip re-render (and scroll reset) when unchanged
   if (key === _evKey) return;
   _evKey = key;
@@ -578,6 +768,15 @@ function relTime(sec){
   if (h < 24) return h + "h ago";
   return Math.round(h / 24) + "d ago";
 }
+// Coarse "in Xh Ym" countdown for the off-duty label (server owns the math).
+function durLabel(sec){
+  if (sec == null) return "a while";
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  if (h && m) return h + "h " + m + "m";
+  if (h) return h + "h";
+  return Math.max(1, m) + "m";
+}
 async function deleteEvent(id){
   await fetch("/api/events/" + encodeURIComponent(id), {method:"DELETE"});
   _evKey = ""; loadEvents();
@@ -587,6 +786,12 @@ async function clearEvents(){
   await fetch("/api/events/clear", {method:"POST"});
   _evKey = ""; loadEvents();
 }
+
+// ---- Kiosk ----
+function goFullscreen(){ document.getElementById("vidwrap").requestFullscreen(); }
+// Hide the button where the Fullscreen API is unavailable (e.g. iOS Safari).
+if (!document.documentElement.requestFullscreen)
+  document.getElementById("fullscreen_btn").style.display = "none";
 
 // ---- Snooze ----
 async function snooze(minutes){
@@ -716,6 +921,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbo
 
 async function poll(){
   const s = await (await fetch("/api/status")).json();
+  _lastSettings = s.settings;   // remembered so a catch notification can name the target
   // Labels follow the watch config: "in view" counts everything detected, the
   // certainty/CONFIRMING wording describes what fires (alert set, or the
   // detected set in monitor mode, where nothing can fire anyway).
@@ -727,6 +933,9 @@ async function poll(){
   if (s.state === "CONFIRMING"){
     word = fireNoun.charAt(0).toUpperCase() + fireNoun.slice(1) + " spotted";
   }
+  // Off-duty (arming schedule) overrides the readout: it still watches, but
+  // reactions are held, so the honest headline is "Off duty".
+  if (s.armed === false){ word = "Off duty"; cls = "state-cooling"; }
   document.getElementById("statetext").textContent = word;
   document.getElementById("statepill").className = "pill " + cls;
   document.body.dataset.state = cls;
@@ -758,6 +967,9 @@ async function poll(){
   document.getElementById("osd_fps").textContent = s.fps ? s.fps + " FPS" : "-- FPS";
 
   for (const k of KNOBS){
+    // Hands off any knob the user touched moments ago (drag in progress or
+    // PATCH round-trip still settling); focus alone misses touch drags.
+    if (Date.now() - (_knobHold[k] || 0) < KNOB_HOLD_MS) continue;
     const el = document.getElementById(k);
     if (document.activeElement !== el){ el.value = s.settings[k]; }
     document.getElementById(k+"_v").textContent = fmt(k, s.settings[k]);
@@ -775,15 +987,24 @@ async function poll(){
 
   document.getElementById("clips_enabled").checked = s.settings.clips_enabled;
   document.getElementById("show_inventory_boxes").checked = s.settings.show_inventory_boxes;
+  document.getElementById("schedule_enabled").checked = s.settings.schedule_enabled;
+  document.getElementById("schedule_editor").style.display = s.settings.schedule_enabled ? "" : "none";
+  syncWindows(s.settings.armed_windows || []);
   const selEl = document.getElementById("selected_sound");
   if (document.activeElement !== selEl){
     const want = s.settings.selected_sound || "random";
     if ([...selEl.options].some(o => o.value === want)){ selEl.value = want; }
   }
 
-  // Snooze (snoozed_until_seconds is refreshed by the pipeline each loop)
+  // Off duty (arming schedule) takes over the snooze row: snoozing is moot when
+  // reactions are already held. Otherwise show snooze state as usual.
   const snz = s.snoozed_until_seconds || 0;
-  if (snz > 0){
+  if (s.armed === false){
+    document.getElementById("snooze_label").textContent =
+      "Back on duty in " + durLabel(s.next_change_seconds);
+    document.getElementById("snooze_btns").style.display = "none";
+    document.getElementById("snooze_resume").style.display = "none";
+  } else if (snz > 0){
     document.getElementById("snooze_label").textContent =
       "Snoozed — " + Math.max(1, Math.ceil(snz / 60)) + "m left";
     document.getElementById("snooze_btns").style.display = "none";
@@ -836,6 +1057,59 @@ async function clearZone(){
   await patch({zone_enabled:false, zone_points:[]});
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
+function setupTalk(){
+  const btn = document.getElementById("ptt");
+  let ws, ctx, node, stream;
+  async function start(e){
+    e.preventDefault();
+    if (ws) return;                       // already talking
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(
+        {audio: {channelCount: 1, echoCancellation: true}});
+    } catch (err) {
+      // getUserMedia is blocked on plain http; the Pi's secure address is https.
+      alert("The microphone needs the https address. Open the secure dashboard and try again.");
+      return;
+    }
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://")
+                       + location.host + "/ws/talk");
+    ws.binaryType = "arraybuffer";
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(stream);
+    // ScriptProcessorNode is deprecated but dependency-free and fine for a
+    // one-listener appliance; AudioWorklet would need a served module file.
+    node = ctx.createScriptProcessor(4096, 1, 1);
+    const ratio = ctx.sampleRate / 16000;
+    node.onaudioprocess = ev => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const input = ev.inputBuffer.getChannelData(0);
+      const outLen = Math.floor(input.length / ratio);
+      const out = new Int16Array(outLen);
+      for (let i = 0; i < outLen; i++){          // index-step downsample to 16 kHz
+        const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      ws.send(out.buffer);
+    };
+    src.connect(node);
+    node.connect(ctx.destination);
+    btn.classList.add("talking");
+    btn.textContent = "Talking...";
+  }
+  function stop(){
+    if (node){ node.onaudioprocess = null; node.disconnect(); node = null; }
+    if (ctx){ ctx.close(); ctx = null; }
+    if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (ws){ ws.close(); ws = null; }
+    btn.classList.remove("talking");
+    btn.textContent = "Hold to talk";
+  }
+  btn.addEventListener("pointerdown", start);
+  btn.addEventListener("pointerup", stop);
+  btn.addEventListener("pointercancel", stop);
+  btn.addEventListener("pointerleave", stop);
+}
+setupTalk();
 loadSounds(); loadEvents(); refreshStats(); refreshLab();
 setInterval(poll, 500); poll();
 setInterval(() => { loadEvents(); refreshStats(); refreshLab(); }, 4000);

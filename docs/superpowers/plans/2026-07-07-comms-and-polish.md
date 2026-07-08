@@ -146,6 +146,61 @@ REMOTE
 
 ---
 
+### Task 1b: Onboarding door (auto-detect missing CA)
+
+Decision record: a page cannot install a CA (OS security model), but a
+plain-HTTP page CAN probe whether this device trusts the home CA — an
+http page may fetch an https URL on the same host, and the fetch fails
+with a TLS error iff the CA is untrusted. Port 8000 therefore stays
+plain HTTP forever as a "door" (bookmarks keep working); the real
+dashboard serves HTTPS on 8443.
+
+**Files:**
+- Create: `src/doggy/web/door.py` (tiny FastAPI app: door page, `/ca.pem`, `/ca.mobileconfig`, `/ping`)
+- Modify: `src/doggy/core/config.py` (`Settings.ssl_port: int = 8443`), `src/doggy/web/app.py` (`serve` orchestrates both), `scripts/setup-https.sh` (URL wording), `README.md`
+- Test: `tests/web/test_door.py` (new)
+
+**Interfaces:**
+- Produces: with TLS configured, `serve()` runs the dashboard app via
+  uvicorn on `ssl_port` (https) and the door app on `web_port` (http) in
+  a daemon thread; without TLS, exactly today (dashboard http on
+  `web_port`, no door). Door endpoints: `GET /` (door page), `GET
+  /ping` (204, CORS `Access-Control-Allow-Origin: *`), `GET /ca.pem`
+  (moves here from the dashboard app), `GET /ca.mobileconfig` (Apple
+  profile wrapping the same CA DER, generated with `uuid.uuid5` on the
+  cert bytes so re-serving is stable).
+- The dashboard app also keeps `/ping` (that is the probe target on the
+  https side; 204, no auth) and keeps `/ca.pem` for direct access.
+
+- [ ] **Step 1: Failing tests** (`tests/web/test_door.py`): door page 200
+  and contains "Secure this device" + a link to `/ca.pem`; `/ping` 204
+  with the CORS header; `/ca.mobileconfig` 200 with
+  `application/x-apple-aspen-config` content type and the base64 CA
+  payload inside a plist containing `com.apple.security.root`; 404s for
+  everything when `ca_cert` unset. Dashboard app: `/ping` 204.
+- [ ] **Step 2: Implement door.py.** The door page is a small inline-HTML
+  page in the visual language of the dashboard (dark, amber, serif
+  wordmark; plain-language copy, no emoji). Its JS probes
+  `fetch("https://" + location.hostname + ":" + SSL_PORT + "/ping", {mode: "cors"})`:
+  on success, `location.replace` to the https dashboard (same path);
+  on failure, reveal the setup section: platform-detected download
+  button (`navigator.userAgent` Apple -> `/ca.mobileconfig`, else
+  `/ca.pem`), the per-platform trust steps, and a "Check again" button
+  that re-probes (plus an automatic re-probe every 5s so finishing the
+  OS steps auto-advances). SSL_PORT is templated server-side into the
+  page.
+- [ ] **Step 3: serve() orchestration.** With TLS configured: build the
+  door app and run it with its own `uvicorn.run` in a
+  `threading.Thread(daemon=True)` on `web_port`, then run the dashboard
+  https on `ssl_port` in the main web thread. Log both URLs at startup.
+  A one-line comment: the door is intentionally unauthenticated and
+  serves only public material.
+- [ ] **Step 4: script + README wording** — the script's final echo now
+  says: open `http://<host>:8000` on each device and follow the page
+  (it detects setup automatically); direct https URL is
+  `https://<host>:8443`.
+- [ ] **Step 5: Gates, commit** — `feat: onboarding door auto-detects missing CA and guides setup`.
+
 ### Task 2: Arming schedule
 
 **Files:**
@@ -233,6 +288,42 @@ def armed_state(cfg, wall_now):
 
 ---
 
+### Task 2b: Zone overlap threshold (stop edge-scrape alarms)
+
+User-reported failure: an animal in an allowed spot whose box merely
+scrapes the watch-area boundary fires the alarm, because
+`ZoneInclusionFilter.in_zone` passes on ANY mask pixel under the box
+(`mask[y1:y2, x1:x2].any()`). Fix: require a minimum FRACTION of the
+box's area inside the zone.
+
+**Files:**
+- Modify: `src/doggy/vision/filters/zone.py`, `src/doggy/core/config.py`, `src/doggy/web/static/index.html`
+- Test: `tests/vision/filters/test_zone.py`
+
+**Interfaces:**
+- Produces: `TunableSettings.zone_overlap: float = Field(0.4, ge=0.0, le=1.0)`; `ZoneInclusionFilter.overlap_fraction(box, points, shape) -> float` (mask pixels under the clipped box / clipped-box area; 0.0 for degenerate boxes); `in_zone(box, points, shape, min_overlap)` passes iff `overlap_fraction >= min_overlap` (with `min_overlap == 0.0` preserving today's any-pixel behavior via `> 0` semantics: use `fraction > 0 if min_overlap == 0 else fraction >= min_overlap`); `filter(...)` and `apply(...)` take/read the threshold from cfg.
+- Inventory zone-scoping deliberately KEEPS any-overlap (items half-off
+  the counter should still count; inventory never alerts) — `apply`
+  narrows candidates with the threshold and inventory without it. Comment
+  this in the code.
+
+- [ ] **Step 1: Failing tests** (`tests/vision/filters/test_zone.py`): a
+  box 30% inside the zone with `zone_overlap=0.4` is excluded from
+  candidates; the same box with `zone_overlap=0.2` passes; fraction math
+  pinned with a half-in box (`overlap_fraction == pytest.approx(0.5,
+  abs=0.02)` on a rectangle straddling a rectangular zone); inventory
+  list still uses any-overlap under a high threshold; degenerate box ->
+  0.0; `zone_overlap=0` preserves any-pixel semantics.
+- [ ] **Step 2: Implement** — `overlap_fraction` uses the existing cached
+  mask: `self._mask[y1:y2, x1:x2].sum() / ((x2-x1)*(y2-y1))` after the
+  existing clipping; guard zero-area. `apply` reads `cfg.zone_overlap`.
+- [ ] **Step 3: Dashboard** — slider in Settings under the watch-area
+  hint: label "How much of the animal must be inside the area", desc
+  "Stops a box that only scrapes the edge from setting it off.", range
+  0-1 step 0.05, percent formatting (add `zone_overlap` to KNOBS and
+  FMT: pct).
+- [ ] **Step 4: Gates, commit** — `feat: zone overlap threshold (no more edge-scrape alarms)`.
+
 ### Task 3: Push-to-talk
 
 **Files:**
@@ -301,24 +392,43 @@ def build_router() -> APIRouter:
             await ws.accept()
             await ws.close(code=1013)   # try again later: someone is talking
             return
-        proc = _spawn_player()
+        proc = None
         try:
+            proc = _spawn_player()      # inside try: a spawn failure must not leak the lock
             await ws.accept()
             while True:
                 data = await ws.receive_bytes()
                 if proc and proc.stdin:
-                    proc.stdin.write(data)
-                    proc.stdin.flush()
+                    try:
+                        proc.stdin.write(data)
+                        proc.stdin.flush()
+                    except OSError:
+                        # Player died mid-stream (e.g. the Bluetooth speaker
+                        # dropped): end the session gracefully.
+                        break
         except WebSocketDisconnect:
             pass
         finally:
-            if proc:
-                proc.stdin.close()
-                proc.terminate()
+            # Every step guarded: stdin.close() re-flushes and ALSO raises
+            # BrokenPipeError on a dead pipe, and nothing here may prevent
+            # the lock release (a held lock bricks push-to-talk until restart).
+            if proc is not None:
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    pass
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
             _busy.release()
 
     return router
 ```
+
+(Post-review correction: the original snippet here leaked `_busy` when the
+player died mid-stream or spawn failed — found Critical in review; this is
+the fixed shape.)
 
 - [ ] **Step 4: Dashboard.** Monitor card `btnrow` gains a hold-button: `<button id="ptt">Hold to talk</button>`. JS: on pointerdown — `getUserMedia({audio: {channelCount: 1, echoCancellation: true}})`, `new AudioContext()`, a `ScriptProcessorNode(4096, 1, 1)` (deprecated but dependency-free and fine for an appliance) whose `onaudioprocess` downsamples `inputBuffer.getChannelData(0)` from `ctx.sampleRate` to 16000 by index-stepping, converts to Int16Array, and `ws.send(int16.buffer)` over `new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/talk")`. On pointerup/pointercancel/pointerleave: stop tracks, close context and socket. While held: button text "Talking...", lamp-colored border. If `getUserMedia` throws (plain http on the Pi): `alert("The microphone needs the https address. Run scripts/setup-https.sh and use https://... instead.")`. Keep all of it inside one `setupTalk()` function.
 - [ ] **Step 5: Gates, commit** — `feat: push-to-talk from the dashboard to the speaker`.
