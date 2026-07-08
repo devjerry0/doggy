@@ -341,24 +341,15 @@
         </div>
       </div>
 
-      <div class="card c-set">
-        <h2>Settings</h2>
+      <details class="card fold c-set">
+        <summary>Settings</summary>
 
-        <!-- Essentials: the on/off switches you reach for most, always visible. -->
-        <div class="toggle">
-          <div><div class="t-label">Deterrent</div><div class="t-desc">Play the sound when a dog is confirmed</div></div>
-          <label class="switch"><input id="safety_enabled" type="checkbox" /><span class="track"></span></label>
-        </div>
-        <div class="toggle">
-          <div><div class="t-label">Ignore people</div><div class="t-desc">Don't react to a person mistaken for a dog</div></div>
-          <label class="switch"><input id="person_suppression_enabled" type="checkbox" /><span class="track"></span></label>
-        </div>
-        <div class="btnrow">
+        <div class="btnrow" style="margin-top:1rem">
           <button class="primary" id="save_btn" onclick="save()">Save settings</button>
           <button onclick="testSound()">Test sound</button>
         </div>
 
-        <!-- Everything else: one collapsed drawer per topic. Tap to open. -->
+        <!-- Each topic is its own collapsed drawer. Tap to open. -->
         <details class="drawer">
           <summary>Detection and sensitivity</summary>
           <div class="field">
@@ -376,6 +367,10 @@
               <input type="checkbox" data-kind="detect" value="bird" />
               <input type="checkbox" data-kind="alert" value="bird" />
             </div>
+          </div>
+          <div class="toggle">
+            <div><div class="t-label">Ignore people</div><div class="t-desc">Don't react to a person mistaken for a dog</div></div>
+            <label class="switch"><input id="person_suppression_enabled" type="checkbox" /><span class="track"></span></label>
           </div>
           <div class="field">
             <div class="row"><label id="lbl_confidence">How sure it must be it's a dog</label><span class="val" id="confidence_v"></span></div>
@@ -476,7 +471,7 @@
             <label class="switch"><input id="escalation_enabled" type="checkbox" /><span class="track"></span></label>
           </div>
         </details>
-      </div>
+      </details>
     </div>
 
     <div class="col-side">
@@ -599,7 +594,6 @@ KNOBS.forEach(k => {
     patch({[k]: parseFloat(el.value)});
   });
 });
-document.getElementById("safety_enabled").addEventListener("change", e => patch({safety_enabled:e.target.checked}));
 document.getElementById("person_suppression_enabled").addEventListener("change", e =>
   patch({person_suppression_enabled:e.target.checked}));
 document.getElementById("escalation_enabled").addEventListener("change", e =>
@@ -1091,7 +1085,6 @@ async function poll(){
     if (document.activeElement !== el){ el.value = s.settings[k]; }
     document.getElementById(k+"_v").textContent = fmt(k, s.settings[k]);
   }
-  document.getElementById("safety_enabled").checked = s.settings.safety_enabled;
   document.getElementById("person_suppression_enabled").checked = s.settings.person_suppression_enabled;
   document.getElementById("escalation_enabled").checked = s.settings.escalation_enabled;
   if (!watchGrid.contains(document.activeElement)){
