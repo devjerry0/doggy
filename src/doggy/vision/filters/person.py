@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import time
+from collections import deque
+from typing import TYPE_CHECKING, Callable
 
 from doggy.vision.detection import Detection
 
@@ -26,37 +28,58 @@ def iou(a: Box, b: Box) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _suppress_against_boxes(
+    targets: list[Detection], person_boxes: list[Box], iou_threshold: float
+) -> list[Detection]:
+    """Drop targets whose box is near-coincident (IoU >= threshold) with any of
+    ``person_boxes``. The threshold is deliberately high so mere overlap never
+    eats a real animal -- only same-pixels double-labels are removed."""
+    return [
+        d for d in targets
+        if not any(iou(d.box, pb) >= iou_threshold for pb in person_boxes)
+    ]
+
+
 def suppress_targets_overlapping_people(
     targets: list[Detection], people: list[Detection], iou_threshold: float
 ) -> list[Detection]:
-    """Drop target detections whose box is near-coincident with a person's box.
-
-    A person misclassified as a target produces a box almost identical to the
-    "person" box (high IoU) -- that pair is one human double-labeled, so suppress
-    the target. A REAL animal merely near or behind a person has its own distinct
-    box that only clips the person's at the edges (low IoU); it is kept and still
-    fires. The threshold is deliberately high so overlap alone never eats a real
-    animal -- only same-pixels double-labels are removed.
-    """
-    return [
-        d for d in targets
-        if not any(iou(d.box, p.box) >= iou_threshold for p in people)
-    ]
+    """Same-frame suppression: drop targets coincident with a person box in this
+    frame. A person misclassified as a target produces a near-identical box (high
+    IoU) -- one human double-labeled. A real animal near/behind a person has its
+    own distinct box (low IoU) and is kept."""
+    return _suppress_against_boxes(targets, [p.box for p in people], iou_threshold)
 
 
 class PersonSuppressionFilter:
     """Filter link: drop targets that are actually misclassified people.
 
-    Applies only when suppression is enabled and people are present: narrows
-    `analysis.targets` to the survivors, then reseeds `analysis.candidates` from
-    them so downstream links (zone) act on the suppressed set.
+    The model flickers person<->dog on the same body from frame to frame, so
+    same-frame coincidence alone misses the "dog" frames (which carry no person
+    box). This filter also REMEMBERS where people were for the last
+    ``person_memory_seconds`` and suppresses a target that lands on a recently
+    seen person location. Stateful, so instantiated once and reused; the clock
+    is injectable for tests.
     """
 
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._recent: deque[tuple[float, Box]] = deque()  # (seen_at, person box)
+
     def apply(self, analysis: "FrameAnalysis", cfg: "TunableSettings") -> None:
-        if not (cfg.person_suppression_enabled and analysis.people):
+        if not cfg.person_suppression_enabled:
             return
-        analysis.targets = suppress_targets_overlapping_people(
-            analysis.targets, analysis.people, cfg.person_iou_threshold)
+        now = self._clock()
+        for p in analysis.people:
+            self._recent.append((now, p.box))
+        # Forget people older than the memory window.
+        horizon = now - cfg.person_memory_seconds
+        while self._recent and self._recent[0][0] < horizon:
+            self._recent.popleft()
+        if not self._recent:
+            return
+        person_boxes = [box for _, box in self._recent]
+        analysis.targets = _suppress_against_boxes(
+            analysis.targets, person_boxes, cfg.person_iou_threshold)
         # Reseed from the alert set, not from `targets`, so detect-only animals
         # never re-enter the candidate list.
         alertable = set(cfg.alert_labels)

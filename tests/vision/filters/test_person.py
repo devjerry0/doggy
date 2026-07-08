@@ -1,7 +1,7 @@
 import numpy as np
 
 from doggy.core.config import TunableSettings
-from doggy.vision.analysis import DetectionAnalyzer
+from doggy.vision.analysis import DetectionAnalyzer, FrameAnalysis
 from doggy.vision.detection import Detection
 from doggy.vision.detector import StubDetector
 from doggy.vision.filters.base import FilterChain
@@ -58,6 +58,49 @@ def test_only_the_coincident_dog_is_removed():
     real = dog((300, 300, 340, 340))
     people = [person((0, 0, 100, 200))]
     assert suppress_targets_overlapping_people([coincident, real], people, 0.85) == [real]
+
+
+def _analysis(targets, people):
+    return FrameAnalysis(shape=(400, 400, 3), people=list(people),
+                         targets=list(targets), candidates=list(targets))
+
+
+def test_flickered_dog_on_recent_person_location_is_suppressed():
+    # The model flickers a standing person to "dog" for a frame. Frame 1 sees the
+    # person; frame 2 (0.5s later) sees a "dog" at the same box and NO person.
+    # The temporal memory must suppress that dog.
+    clock = {"t": 100.0}
+    f = PersonSuppressionFilter(clock=lambda: clock["t"])
+    cfg = TunableSettings(person_memory_seconds=3.0, person_iou_threshold=0.85)
+    a1 = _analysis(targets=[], people=[person((0, 0, 100, 200))])
+    f.apply(a1, cfg)
+    clock["t"] = 100.5
+    a2 = _analysis(targets=[dog((1, 1, 99, 199))], people=[])
+    f.apply(a2, cfg)
+    assert a2.targets == [] and a2.candidates == []
+
+
+def test_person_memory_expires_after_window():
+    clock = {"t": 100.0}
+    f = PersonSuppressionFilter(clock=lambda: clock["t"])
+    cfg = TunableSettings(person_memory_seconds=3.0, person_iou_threshold=0.85)
+    f.apply(_analysis(targets=[], people=[person((0, 0, 100, 200))]), cfg)
+    clock["t"] = 104.0  # 4s later, past the 3s window
+    a = _analysis(targets=[dog((1, 1, 99, 199))], people=[])
+    f.apply(a, cfg)
+    assert a.targets == [dog((1, 1, 99, 199))]  # remembered person forgotten -> kept
+
+
+def test_real_dog_not_suppressed_by_distant_recent_person():
+    clock = {"t": 100.0}
+    f = PersonSuppressionFilter(clock=lambda: clock["t"])
+    cfg = TunableSettings(person_memory_seconds=3.0, person_iou_threshold=0.85)
+    f.apply(_analysis(targets=[], people=[person((0, 0, 100, 200))]), cfg)
+    clock["t"] = 100.5
+    real = dog((300, 300, 340, 340))  # its own distinct box, low IoU with the person
+    a = _analysis(targets=[real], people=[])
+    f.apply(a, cfg)
+    assert a.targets == [real]
 
 
 def test_reseed_after_suppression_keeps_detect_only_class_out_of_candidates():

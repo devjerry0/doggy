@@ -473,6 +473,11 @@
             <div class="row"><label>How closely a dog must match a person to be ignored</label><span class="val" id="person_iou_threshold_v"></span></div>
             <input id="person_iou_threshold" type="range" min="0" max="1" step="0.01" />
           </div>
+          <div class="field">
+            <div class="row"><label>Remember where people were for</label><span class="val" id="person_memory_seconds_v"></span></div>
+            <div class="desc">A dog that appears where a person just stood is treated as that person still flickering.</div>
+            <input id="person_memory_seconds" type="range" min="0" max="10" step="0.5" />
+          </div>
           <div class="toggle">
             <div><div class="t-label">Escalate while it stays</div><div class="t-desc">Play again, louder, if the animal doesn't leave after the first sound.</div></div>
             <label class="switch"><input id="escalation_enabled" type="checkbox" /><span class="track"></span></label>
@@ -566,7 +571,7 @@
 <script>
 const KNOBS = ["confidence","zone_overlap","confirm_seconds","window_m","window_n","cooldown_min_seconds",
                "cooldown_max_seconds","max_fires_per_hour","detect_interval_seconds",
-               "person_iou_threshold","max_volume","soothing_volume","talk_volume"];
+               "person_iou_threshold","person_memory_seconds","max_volume","soothing_volume","talk_volume"];
 const pct = v => Math.round(v * 100) + "%";
 const secs = v => (Math.round(v * 10) / 10) + "s";
 // Inventory labels with irregular plurals; anything else just takes an "s".
@@ -575,7 +580,8 @@ const PLURALS = {"sandwich":"sandwiches", "wine glass":"wine glasses",
 const plural = label => PLURALS[label] || label + "s";
 const FMT = {confidence:pct, zone_overlap:pct, person_iou_threshold:pct, max_volume:pct, soothing_volume:pct,
              talk_volume:pct,
-             confirm_seconds:secs, cooldown_min_seconds:secs, cooldown_max_seconds:secs, detect_interval_seconds:secs};
+             confirm_seconds:secs, cooldown_min_seconds:secs, cooldown_max_seconds:secs, detect_interval_seconds:secs,
+             person_memory_seconds:secs};
 const fmt = (k, v) => (FMT[k] || String)(v);
 const STATE = {IDLE:["Watching","state-watching"], CONFIRMING:["Dog spotted","state-spotted"],
                COOLDOWN:["Cooling down","state-cooling"]};

@@ -82,6 +82,10 @@ class TunableSettings(BaseModel):
     # A "dog" whose box overlaps a person's by at least this IoU is treated as a
     # misclassified person and suppressed (not fired on). High by design.
     person_iou_threshold: float = Field(0.85, ge=0.0, le=1.0)
+    # The model flickers person<->dog on the same body across frames. Remember
+    # where people were for this long, so a "dog" landing where a person just
+    # was (high IoU) is suppressed even in a frame with no person box.
+    person_memory_seconds: float = Field(3.0, ge=0.0)
     # Counter inventory: food/tableware detection for the readout + theft diffs.
     inventory_enabled: bool = True
     # Overhead food shots score low; independent, laxer threshold.
