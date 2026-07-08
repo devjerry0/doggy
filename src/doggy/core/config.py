@@ -174,6 +174,10 @@ class Settings(TunableSettings, BaseSettings):
     alerter_backend: str = "sounddevice"  # sounddevice | command | log
     audio_device: str | None = None
     event_log_dir: Path = Path("events")
+    # Soothing sounds library: calm audio users upload for the looping player.
+    # soothing_limit_bytes caps the whole library (1 GiB) and each single file.
+    soothing_dir: Path = Path("soothing")
+    soothing_limit_bytes: int = 1_073_741_824
     web_enabled: bool = True
     web_host: str = "127.0.0.1"
     web_port: int = 8000
