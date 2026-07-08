@@ -22,6 +22,11 @@ _SOOTHING_EXTS = {".mp3", ".wav", ".flac", ".ogg"}
 # mode off (or an empty library) is noticed, and a running track stops, in ~1s.
 _POLL_SECONDS = 0.5
 
+# Sentinel from _await_exit: the volume was changed mid-track, so the current
+# track should be re-spawned at the new volume (pw-play's --volume is fixed at
+# spawn; restarting is how a volume change takes effect on the running track).
+_REVOLUME = object()
+
 Spawn = Callable[[Path, float], "subprocess.Popen | None"]
 
 
@@ -117,7 +122,7 @@ class SoothingPlayer:
                 continue
             track = tracks[index % len(tracks)]
             index += 1
-            if self._play(track, cfg.soothing_volume):
+            if self._play(track):
                 fails_this_pass += 1
                 # A whole pass over the library failed (every file missing or the
                 # player bailed): idle once before retrying so a broken library
@@ -129,64 +134,76 @@ class SoothingPlayer:
                 fails_this_pass = 0
         self._set_track(None)
 
-    def _play(self, track: Path, volume: float) -> bool:
-        """Play one track to its end. Returns True only when it failed for track
-        reasons (unplayable file / nonzero exit) so a fully broken library backs
-        off; a track cut short on purpose (mode off, shutdown, or a catch)
-        returns False."""
-        proc = self._spawn(track, volume)
-        if proc is None:
-            log.info("soothing: could not start %s; skipping", track.name)
-            return True
-        with self._lock:
-            self._proc = proc
-            held = self._clock() < self._hold_until
-        if held:
-            # A catch armed the hold in the spawn window -- after the loop-top
-            # hold check but before we registered proc here -- so on_dog_caught
-            # saw a null proc and terminated nothing. Cut this track now; the loop
-            # top settles into the hold. (Belt to _await_exit's per-slice check.)
-            proc.terminate()
-            self._wait_slice(proc)  # reap (bounded: one slice)
+    def _play(self, track: Path) -> bool:
+        """Play one track to its end at the live soothing volume. If the volume
+        is changed while it plays, the same track is re-spawned at the new volume
+        (from the start -- pw-play's --volume is fixed at spawn) so the change is
+        heard immediately instead of only on the next track. Returns True only
+        when it failed for track reasons (unplayable file / nonzero exit) so a
+        fully broken library backs off; a track cut short on purpose (mode off,
+        shutdown, or a catch) returns False."""
+        while not self._stop.is_set():
+            volume = self._runtime.get().soothing_volume
+            proc = self._spawn(track, volume)
+            if proc is None:
+                log.info("soothing: could not start %s; skipping", track.name)
+                return True
+            with self._lock:
+                self._proc = proc
+                held = self._clock() < self._hold_until
+            if held:
+                # A catch armed the hold in the spawn window -- after the loop-top
+                # hold check but before we registered proc here -- so on_dog_caught
+                # saw a null proc and terminated nothing. Cut this track now; the
+                # loop top settles into the hold. (Belt to _await_exit's check.)
+                proc.terminate()
+                self._wait_slice(proc)  # reap (bounded: one slice)
+                with self._lock:
+                    if self._proc is proc:
+                        self._proc = None
+                    if self._interrupted is proc:
+                        self._interrupted = None
+                self._set_track(None)
+                return False
+            self._set_track(track.name)
+            code = self._await_exit(proc, volume)
             with self._lock:
                 if self._proc is proc:
                     self._proc = None
-                if self._interrupted is proc:
+                interrupted = self._interrupted is proc
+                if interrupted:
                     self._interrupted = None
-            self._set_track(None)
-            return False
-        self._set_track(track.name)
-        code = self._await_exit(proc)
-        with self._lock:
-            if self._proc is proc:
-                self._proc = None
-            interrupted = self._interrupted is proc
+            if code is _REVOLUME:
+                # Volume changed: replay THIS track at the new volume. Keep the
+                # status track name (unchanged), don't advance the library index.
+                continue
+            if code is None:
+                # We stopped it (mode off / shutdown); the loop top will idle.
+                self._set_track(None)
+                return False
             if interrupted:
-                self._interrupted = None
-        if code is None:
-            # We stopped it (mode off / shutdown); the loop top will idle.
-            self._set_track(None)
+                # A catch cut it; the hold is armed. Resume the next track later.
+                self._set_track(None)
+                return False
+            if code != 0:
+                log.info("soothing: player exited %s for %s; skipping", code, track.name)
+                return True
             return False
-        if interrupted:
-            # A catch cut it; the hold is armed. Resume the next track later.
-            self._set_track(None)
-            return False
-        if code != 0:
-            log.info("soothing: player exited %s for %s; skipping", code, track.name)
-            return True
         return False
 
-    def _await_exit(self, proc) -> int | None:
+    def _await_exit(self, proc, volume: float):
         """Wait for the player to exit in poll-sized slices, re-reading config
         between them. Returns its exit code (including when a catch terminated
-        it), or None if we terminated it ourselves -- the mode was turned off, we
-        are shutting down, or a hold was armed while this track was mid-flight
-        (the spawn-window race) so it must not outlive the hold."""
+        it); None if we terminated it ourselves (mode off, shutdown, or a hold
+        armed mid-flight); or the ``_REVOLUME`` sentinel if the volume changed
+        (the caller re-spawns the same track at the new volume). ``volume`` is
+        the value this track was spawned with."""
         while True:
             code = self._wait_slice(proc)
             if code is not None:
                 return code
-            if self._stop.is_set() or not self._runtime.get().soothing_enabled:
+            cfg = self._runtime.get()
+            if self._stop.is_set() or not cfg.soothing_enabled:
                 proc.terminate()
                 self._wait_slice(proc)  # reap (bounded: one slice)
                 return None
@@ -197,6 +214,12 @@ class SoothingPlayer:
                 proc.terminate()
                 self._wait_slice(proc)  # reap (bounded: one slice)
                 return None
+            if cfg.soothing_volume != volume:
+                # The user moved the loudness slider: restart this track at the
+                # new volume so the change is heard now, not at the next track.
+                proc.terminate()
+                self._wait_slice(proc)  # reap (bounded: one slice)
+                return _REVOLUME
 
     def _wait_slice(self, proc) -> int | None:
         try:

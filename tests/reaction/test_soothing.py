@@ -177,11 +177,29 @@ def test_volume_read_fresh_per_track(tmp_path):
     with running(_player(tmp_path, spawn, rt=rt)):
         _wait_for(lambda: len(spawn.calls) == 1)
         assert spawn.calls[0][1] == 0.4
-        rt.update(TunableSettings(soothing_enabled=True, soothing_volume=0.7))
-        spawn.procs[0].finish(0)  # let track a end so b starts
+        spawn.procs[0].finish(0)  # let track a end so b starts at the same volume
         _wait_for(lambda: len(spawn.calls) == 2)
         assert spawn.calls[1][0].name == "b.mp3"
-        assert spawn.calls[1][1] == 0.7
+        assert spawn.calls[1][1] == 0.4
+
+
+def test_volume_change_restarts_current_track_at_new_volume(tmp_path):
+    # Moving the loudness slider mid-track must take effect immediately: the
+    # SAME track is re-spawned at the new volume (pw-play's --volume is fixed at
+    # spawn), rather than the change waiting for the next track to start.
+    _tracks(tmp_path, "a.mp3", "b.mp3")
+    spawn = FakeSpawn(lambda p, v: FakeProc(autofinish=False))
+    rt = _runtime(enabled=True, volume=0.4)
+    with running(_player(tmp_path, spawn, rt=rt)):
+        _wait_for(lambda: len(spawn.calls) == 1)
+        assert spawn.calls[0][0].name == "a.mp3" and spawn.calls[0][1] == 0.4
+        first = spawn.procs[0]
+        rt.update(TunableSettings(soothing_enabled=True, soothing_volume=0.1))
+        # No manual finish: the running track is cut and re-spawned at 0.1.
+        _wait_for(lambda: len(spawn.calls) == 2)
+        assert first.terminated
+        assert spawn.calls[1][0].name == "a.mp3"  # same track, not advanced to b
+        assert spawn.calls[1][1] == 0.1
 
 
 def test_toggle_off_terminates_current_track(tmp_path):
