@@ -63,16 +63,21 @@
   .card-head h2{margin:0;padding:0;border:0}
   /* Foldable secondary card: its header is the tap target; the body collapses. */
   details.fold > summary{list-style:none;cursor:pointer;display:flex;
-             align-items:center;justify-content:space-between;gap:1rem;
+             align-items:center;gap:.6rem;
              font-family:var(--mono);font-size:.66rem;font-weight:600;text-transform:uppercase;
              letter-spacing:.24em;color:var(--stone);
              padding-bottom:.6rem;border-bottom:1px solid var(--seam);transition:color .15s}
   details.fold > summary::-webkit-details-marker{display:none}
-  details.fold > summary::after{content:"▾";font-size:.72rem;color:var(--stone)}
+  details.fold > summary::after{content:"▾";font-size:.72rem;color:var(--stone);margin-left:auto}
   details.fold[open] > summary{margin-bottom:1rem}
   details.fold[open] > summary::after{content:"▴"}
   details.fold > summary:hover{color:var(--lamp)}
   details.fold > summary:hover::after{color:var(--lamp)}
+  /* Small live note in a collapsed fold's header (e.g. the playing track). */
+  .fold-note{margin-left:auto;font-family:var(--sans);text-transform:none;
+             letter-spacing:normal;font-weight:500;font-size:.74rem;color:var(--lamp);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58%}
+  details.fold[open] > summary .fold-note{display:none}  /* only when collapsed */
 
   /* ---- The monitor: bezel, scrims, OSD ---- */
   .monitor-card{padding:.65rem .65rem 1.1rem}
@@ -202,11 +207,13 @@
   /* ---- Catch log ---- */
   .events{display:flex;flex-direction:column;gap:.6rem;max-height:360px;overflow-y:auto}
   .events .ev{display:flex;align-items:center;gap:.75rem}
-  .events img{height:48px;width:64px;object-fit:cover;border-radius:5px;
-              border:1px solid var(--seam);cursor:pointer;transition:border-color .15s}
+  .events img{height:48px;width:64px;object-fit:cover;border-radius:5px;display:block;
+              border:1px solid var(--seam);cursor:pointer;transition:border-color .15s;
+              font-size:0;color:transparent}  /* font-size:0 hides broken-image alt text */
   .events img:hover{border-color:var(--lamp)}
   .empty{font-family:var(--serif);font-style:italic;color:var(--stone);font-size:.95rem}
-  .thumb{position:relative;flex:none;line-height:0;cursor:pointer}
+  .thumb{position:relative;flex:none;width:64px;height:48px;overflow:hidden;
+         border-radius:5px;line-height:0;cursor:pointer}
   .playbadge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
              width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);
              display:flex;align-items:center;justify-content:center;pointer-events:none}
@@ -486,8 +493,8 @@
         <div class="events" id="events"></div>
       </div>
 
-      <div class="card c-act">
-        <h2>Activity</h2>
+      <details class="card fold c-act">
+        <summary>Activity<span class="fold-note" id="act_summary"></span></summary>
         <div class="act-top"><span class="num" id="act_today">–</span> today, <span class="num" id="act_week">–</span> this week</div>
         <div class="bars" id="act_bars"></div>
         <div class="act-notes">
@@ -495,7 +502,7 @@
           <span class="act-note" id="act_busy" style="display:none"></span>
           <span class="act-note" id="act_lat" style="display:none"></span>
         </div>
-      </div>
+      </details>
 
       <details class="card fold c-lab">
         <summary>Deterrence</summary>
@@ -503,7 +510,7 @@
       </details>
 
       <details class="card fold c-soothe">
-        <summary>Soothing sounds</summary>
+        <summary>Soothing sounds<span class="fold-note" id="soothe_summary"></span></summary>
         <div class="toggle">
           <div><div class="t-label">Play soothing sounds</div><div class="t-desc">Loops your calm audio through the speaker. The deterrent still interrupts it.</div></div>
           <label class="switch"><input id="soothing_enabled" type="checkbox" /><span class="track"></span></label>
@@ -866,6 +873,9 @@ async function refreshStats(){
   try { st = await (await fetch("/api/stats")).json(); } catch(e){ return; }
   document.getElementById("act_today").textContent = st.today;
   document.getElementById("act_week").textContent = st.this_week;
+  // Collapsed-header note: today's count at a glance.
+  document.getElementById("act_summary").textContent =
+    st.today ? (st.today + " today") : "";
   const days = st.per_day || [];
   const max = Math.max(1, ...days.map(d => d.count));
   document.getElementById("act_bars").innerHTML = days.map(d => {
@@ -1106,6 +1116,9 @@ async function poll(){
   } else {
     soothingNow.style.display = "none";
   }
+  // Collapsed-header note: show the playing track so you don't have to open it.
+  document.getElementById("soothe_summary").textContent =
+    (s.settings.soothing_enabled && s.soothing_track) ? "Playing" : "";
   document.getElementById("schedule_enabled").checked = s.settings.schedule_enabled;
   document.getElementById("schedule_editor").style.display = s.settings.schedule_enabled ? "" : "none";
   armedEditor.sync(s.settings.armed_windows || []);
