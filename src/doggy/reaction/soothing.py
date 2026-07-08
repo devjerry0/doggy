@@ -140,6 +140,21 @@ class SoothingPlayer:
             return True
         with self._lock:
             self._proc = proc
+            held = self._clock() < self._hold_until
+        if held:
+            # A catch armed the hold in the spawn window -- after the loop-top
+            # hold check but before we registered proc here -- so on_dog_caught
+            # saw a null proc and terminated nothing. Cut this track now; the loop
+            # top settles into the hold. (Belt to _await_exit's per-slice check.)
+            proc.terminate()
+            self._wait_slice(proc)  # reap (bounded: one slice)
+            with self._lock:
+                if self._proc is proc:
+                    self._proc = None
+                if self._interrupted is proc:
+                    self._interrupted = None
+            self._set_track(None)
+            return False
         self._set_track(track.name)
         code = self._await_exit(proc)
         with self._lock:
@@ -164,13 +179,21 @@ class SoothingPlayer:
     def _await_exit(self, proc) -> int | None:
         """Wait for the player to exit in poll-sized slices, re-reading config
         between them. Returns its exit code (including when a catch terminated
-        it), or None if we terminated it because the mode was turned off or we
-        are shutting down."""
+        it), or None if we terminated it ourselves -- the mode was turned off, we
+        are shutting down, or a hold was armed while this track was mid-flight
+        (the spawn-window race) so it must not outlive the hold."""
         while True:
             code = self._wait_slice(proc)
             if code is not None:
                 return code
             if self._stop.is_set() or not self._runtime.get().soothing_enabled:
+                proc.terminate()
+                self._wait_slice(proc)  # reap (bounded: one slice)
+                return None
+            if self._is_held():
+                # A catch armed the hold while this track was playing without its
+                # terminate() reaching us; cut it so no calm track plays under the
+                # armed hold. The loop top then settles into the hold.
                 proc.terminate()
                 self._wait_slice(proc)  # reap (bounded: one slice)
                 return None
@@ -206,12 +229,19 @@ class SoothingPlayer:
         )
 
     def _spawn_player(self, path: Path, volume: float) -> subprocess.Popen | None:
-        # Mirror CommandAlerter's backend fallback: PipeWire players on the Pi
-        # (so a Bluetooth sink works), afplay on macOS. pw-play decodes mp3
-        # on-device; pw-cat is the same binary under another name.
+        # Backend fallback pw-play -> pw-cat on the Pi (so a Bluetooth sink
+        # works), afplay on macOS. Unlike CommandAlerter (pw-play -> paplay ->
+        # aplay) we deliberately do NOT fall back to paplay/aplay: those decode
+        # only PCM/WAV and the soothing library is mostly mp3, which pw-play and
+        # pw-cat decode on-device. pw-play and pw-cat are the same PipeWire binary
+        # but bare pw-cat needs an explicit --playback ("one of the playback/
+        # record options must be provided"); pw-play defaults to playback.
         player = shutil.which("pw-play") or shutil.which("pw-cat")
         if player:
-            cmd = [player, "--volume", str(volume), str(path)]
+            cmd = [player, "--volume", str(volume)]
+            if Path(player).name == "pw-cat":
+                cmd.append("--playback")
+            cmd.append(str(path))
         elif sys.platform == "darwin":
             cmd = ["afplay", "-v", str(volume), str(path)]
         else:

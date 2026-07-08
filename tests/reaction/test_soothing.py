@@ -246,6 +246,85 @@ def test_catch_with_zero_resume_resumes_immediately_with_next(tmp_path):
         _wait_for(lambda: spawn.names[:2] == ["a.mp3", "b.mp3"])
 
 
+def test_catch_in_spawn_window_is_cut_and_stays_held(tmp_path):
+    # Reviewer's race: a catch lands AFTER the loop-top hold check but BEFORE
+    # _play registers the freshly spawned proc. on_dog_caught reads a null proc
+    # and terminates nothing; without the fix the calm track plays to its natural
+    # end THROUGH the armed hold. Reproduce it deterministically (no sleeps) by
+    # firing the catch from inside spawn -- spawn runs before registration.
+    _tracks(tmp_path, "a.mp3", "b.mp3")
+    clk = FakeClock(0.0)
+    status = StatusStore()
+    caught = threading.Event()
+
+    def factory(p, v):
+        proc = FakeProc(autofinish=False)
+        if not caught.is_set():  # fire once, inside the first spawn's window
+            caught.set()
+            player.on_dog_caught(None)  # _proc still None here -> cuts nothing
+        return proc
+
+    spawn = FakeSpawn(factory)
+    player = _player(tmp_path, spawn, rt=_runtime(enabled=True, resume=45.0),
+                     status=status, clock=clk)
+    with running(player):
+        # The track spawned into the hold must be terminated, not left playing.
+        _wait_for(lambda: spawn.procs and spawn.procs[0].terminated)
+        # ...and nothing new starts while the hold is armed.
+        clk.t = 30.0
+        time.sleep(0.05)
+        assert len(spawn.calls) == 1
+        assert status.snapshot().soothing_track is None
+        # Past the hold: playback resumes with the NEXT track.
+        clk.t = 50.0
+        _wait_for(lambda: len(spawn.calls) == 2)
+        assert spawn.calls[1][0].name == "b.mp3"
+
+
+def test_catch_in_spawn_window_is_cut_at_registration(tmp_path):
+    # Pins the registration-seam guard specifically: the track spawned into the
+    # hold is cut the instant it is registered, before _await_exit's first poll
+    # slice can even elapse. Poll is deliberately huge so the per-slice re-check
+    # cannot be what cuts it -- only the register-time hold check can, fast.
+    _tracks(tmp_path, "a.mp3")
+    clk = FakeClock(0.0)
+    caught = threading.Event()
+
+    def factory(p, v):
+        proc = FakeProc(autofinish=False)
+        if not caught.is_set():
+            caught.set()
+            player.on_dog_caught(None)  # catch in the spawn window
+        return proc
+
+    spawn = FakeSpawn(factory)
+    player = _player(tmp_path, spawn, rt=_runtime(enabled=True, resume=45.0),
+                     clock=clk, poll=5.0)  # a slice is 5s; the per-slice check is too slow
+    with running(player):
+        _wait_for(lambda: spawn.procs and spawn.procs[0].terminated, timeout=1.0)
+
+
+def test_await_exit_cuts_track_when_hold_armed_mid_flight(tmp_path):
+    # Second seam: a hold can be armed while a track is already registered and
+    # mid-flight without a catch's terminate() reaching THIS proc. _await_exit
+    # must re-check the hold per slice and cut the track, or a calm track
+    # outlives the hold. Arm the hold directly (no catch touches the proc) so the
+    # ONLY thing that can stop the track is _await_exit's per-slice hold re-check.
+    _tracks(tmp_path, "a.mp3", "b.mp3")
+    clk = FakeClock(0.0)
+    spawn = FakeSpawn(lambda p, v: FakeProc(autofinish=False))
+    player = _player(tmp_path, spawn, rt=_runtime(enabled=True, resume=45.0), clock=clk)
+    with running(player):
+        _wait_for(lambda: spawn.names[:1] == ["a.mp3"])  # registered, in _await_exit
+        proc_a = spawn.procs[0]
+        with player._lock:
+            player._hold_until = 45.0  # armed after registration; proc untouched
+        _wait_for(lambda: proc_a.terminated)  # only the hold re-check can do this
+        clk.t = 50.0
+        _wait_for(lambda: len(spawn.calls) == 2)
+        assert spawn.calls[1][0].name == "b.mp3"
+
+
 def test_unplayable_track_is_skipped(tmp_path):
     _tracks(tmp_path, "a.mp3", "b.mp3")
 
@@ -306,7 +385,9 @@ def test_spawn_player_falls_back_to_pw_cat(monkeypatch, tmp_path):
     monkeypatch.setattr(mod.subprocess, "Popen", lambda cmd: cmds.append(cmd) or object())
     player = SoothingPlayer(_runtime(), tmp_path, StatusStore())
     player._spawn_player(tmp_path / "calm.wav", 0.5)
-    assert cmds[0] == ["/usr/bin/pw-cat", "--volume", "0.5", str(tmp_path / "calm.wav")]
+    # Bare pw-cat needs an explicit --playback; pw-play (above) defaults to it.
+    assert cmds[0] == [
+        "/usr/bin/pw-cat", "--volume", "0.5", "--playback", str(tmp_path / "calm.wav")]
 
 
 def test_spawn_player_darwin_uses_afplay(monkeypatch, tmp_path):
