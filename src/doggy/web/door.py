@@ -155,8 +155,6 @@ _PAGE = """<!doctype html>
         display:inline-block;padding:.6rem 1.1rem;border-radius:8px;cursor:pointer;
         text-decoration:none;background:var(--lamp);color:#1a130a;border:1px solid var(--lamp)}
   a.download:hover,button:hover{background:var(--lamp-soft);border-color:var(--lamp-soft)}
-  button.ghost{background:transparent;color:var(--linen);border-color:var(--seam)}
-  button.ghost:hover{background:transparent;color:var(--lamp);border-color:var(--lamp)}
   .row{display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;margin-top:1rem}
   .hidden{display:none}
   code{font-family:var(--mono);color:var(--lamp-soft);font-size:.85rem}
@@ -187,7 +185,7 @@ _PAGE = """<!doctype html>
 
     <div class="row">
       <button id="again" type="button">Check again</button>
-      <span class="muted">or just finish the steps -- this page notices on its own.</span>
+      <span class="muted">or just finish the steps and this page notices on its own.</span>
     </div>
     <p class="muted" style="margin-top:1.1rem">Direct address once trusted:
        <code id="direct"></code></p>
