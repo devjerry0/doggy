@@ -100,6 +100,13 @@ class TunableSettings(BaseModel):
     escalation_seconds: float = Field(8.0, ge=1)
     escalation_max_strikes: int = Field(3, ge=1)
     escalation_volume_step: float = Field(0.2, ge=0, le=1)
+    # Soothing sounds: loop uploaded calm audio through the speaker. A confirmed
+    # catch cuts the current track and holds playback for soothing_resume_seconds
+    # (long by default so one catch covers a whole escalation sequence, whose
+    # strikes publish no hub event -- otherwise music would resume between strikes).
+    soothing_enabled: bool = False
+    soothing_volume: float = Field(0.4, ge=0.0, le=1.0)
+    soothing_resume_seconds: float = Field(45.0, ge=0.0)
     # Weekly arming schedule: when on, reactions only happen inside armed_windows
     # (detection keeps running around the clock). Empty windows = always armed.
     # NoDecode: the .env form is a JSON string; _parse_windows json.loads it (the
