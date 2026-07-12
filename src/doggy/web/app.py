@@ -14,7 +14,7 @@ from doggy.core.runtime import RuntimeSettings
 from doggy.core.status import FrameBuffer, StatusStore
 from doggy.web.door import create_door_app
 from doggy.web.envfile import write_env as _write_env
-from doggy.web.routers import events, snooze, soothing, sounds, talk
+from doggy.web.routers import events, snooze, soothing, sounds, speaker, talk
 from doggy.web.routers import settings as settings_router
 from doggy.web.routers import status as status_router
 
@@ -53,6 +53,7 @@ def create_app(settings: Settings, runtime: RuntimeSettings,
     app.include_router(soothing.build_router(settings))
     app.include_router(snooze.build_router(gate))
     app.include_router(talk.build_router(runtime))
+    app.include_router(speaker.build_router())
 
     return app
 

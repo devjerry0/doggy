@@ -330,6 +330,11 @@
             <div class="row"><label for="talk_volume">Voice loudness</label><span class="val" id="talk_volume_v"></span></div>
             <input id="talk_volume" type="range" min="0" max="1" step="0.01" />
           </div>
+          <div class="field" id="speaker_field" style="margin:.8rem 0 0;display:none">
+            <div class="row"><label for="speaker_volume">Speaker volume</label><span class="val" id="speaker_volume_v"></span></div>
+            <div class="desc">Overall speaker loudness. Scales the deterrent, soothing, and your voice.</div>
+            <input id="speaker_volume" type="range" min="0" max="1" step="0.01" />
+          </div>
           <div class="readout">
             <div class="stat"><div class="k" id="lbl_inview">Dogs in view</div><div class="v" id="dogs">–</div></div>
             <div class="stat"><div class="k">People in view</div><div class="v" id="people">–</div></div>
@@ -1256,9 +1261,34 @@ function setupTalk(){
   btn.addEventListener("pointerleave", stop);
 }
 setupTalk();
-loadSounds(); loadEvents(); refreshStats(); refreshLab(); refreshSoothing();
+// ---- Speaker volume (the hardware sink level, via /api/speaker-volume) ----
+// Not a tunable setting: it's the PipeWire sink's own volume, so it has its own
+// endpoint and its own touch-lock (mirrors the KNOB one) instead of KNOBS/patch.
+const speakerEl = document.getElementById("speaker_volume");
+let _speakerHold = 0;
+speakerEl.addEventListener("input", () => {
+  _speakerHold = Date.now();
+  document.getElementById("speaker_volume_v").textContent = pct(parseFloat(speakerEl.value));
+});
+speakerEl.addEventListener("change", async () => {
+  _speakerHold = Date.now();
+  await fetch("/api/speaker-volume", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({volume: parseFloat(speakerEl.value)})});
+});
+async function refreshSpeaker(){
+  let d;
+  try { d = await (await fetch("/api/speaker-volume")).json(); } catch(e){ return; }
+  const field = document.getElementById("speaker_field");
+  if (d.volume == null){ field.style.display = "none"; return; }  // no PipeWire (dev host)
+  field.style.display = "";
+  if (Date.now() - _speakerHold < KNOB_HOLD_MS) return;  // hands off mid-drag
+  if (document.activeElement !== speakerEl){ speakerEl.value = d.volume; }
+  document.getElementById("speaker_volume_v").textContent = pct(d.volume);
+}
+
+loadSounds(); loadEvents(); refreshStats(); refreshLab(); refreshSoothing(); refreshSpeaker();
 setInterval(poll, 500); poll();
-setInterval(() => { loadEvents(); refreshStats(); refreshLab(); refreshSoothing(); }, 4000);
+setInterval(() => { loadEvents(); refreshStats(); refreshLab(); refreshSoothing(); refreshSpeaker(); }, 4000);
 </script>
 </body>
 </html>
